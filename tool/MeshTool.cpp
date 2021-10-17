@@ -22,13 +22,22 @@ limitations under the License.
 #include <vector>
 #include <string_view>
 #include <cstring>
+#include <bitset>
 #include "BinFBX.h"
 #include "MeshTool.h"
 
 namespace ControlModding
 {
+    bool bPrint = true;
     MeshTool::MeshTool() = default;
     MeshTool::~MeshTool() = default;
+    enum PrintType
+    {
+        None,
+        Binary,
+        Hexadecimal,
+        Decimal,
+    };
     void MeshTool::ProcessArgs ( int argc, char** argv )
     {
         if ( argc < 2 || ( strcmp ( argv[1], "binfbx" ) != 0 ) )
@@ -90,13 +99,13 @@ namespace ControlModding
         uint32_t count = reinterpret_cast<uint32_t*>(aIndex)[0];
         if(aCount){*aCount = count;}
         aIndex+=sizeof(uint32_t);
-        std::cout << aName << " ("<< count << ")";
+        if(bPrint) std::cout << aName << " ("<< count << ")";
         for(uint32_t i = 0;i<count;++i)
         {
-            std::cout << "\t" << reinterpret_cast<T*>(aIndex)[0];
+            if(bPrint) std::cout << "\t" << reinterpret_cast<T*>(aIndex)[0];
             aIndex+=sizeof(T);
         }
-        std::cout << std::endl;
+        if(bPrint) std::cout << std::endl;
         return aIndex;
     }
 
@@ -106,16 +115,16 @@ namespace ControlModding
         uint32_t count = reinterpret_cast<uint32_t*>(aIndex)[0];
         if(aCount){*aCount = count;}
         aIndex+=sizeof(uint32_t);
-        std::cout << aName << " ("<< count << ") ";
+        if(bPrint) std::cout << aName << " ("<< count << ") ";
         for(uint32_t i = 0;i<count;++i)                        
         {
             if(aIndex[0]!=0)
             {
-                std::cout << aIndex[0];
+                if(bPrint)  std::cout << aIndex[0];
             }
             aIndex+=1;
         }
-        std::cout << std::endl;
+        if(bPrint) std::cout << std::endl;
         return aIndex;
     }
 
@@ -125,46 +134,76 @@ namespace ControlModding
         uint32_t count = reinterpret_cast<uint32_t*>(aIndex)[0];
         if(aCount){*aCount = count;}
         aIndex+=sizeof(uint32_t);
-        std::cout << aName << " ("<< count << ")";
+        if(bPrint)  std::cout << aName << " ("<< count << ")";
         for(uint32_t i = 0;i<count;++i)
         {
-            std::cout << " " << static_cast<uint32_t>(aIndex[0]);
+            if(bPrint) std::cout << " " << static_cast<uint32_t>(aIndex[0]);
             aIndex+=1;
         }
-        std::cout << std::endl;
+        if(bPrint) std::cout << std::endl;
         return aIndex;
     }
 
     template<class T>
-    uint8_t* PrintArrayCount(uint8_t* aIndex, std::string_view aName, uint32_t aCount)
+    uint8_t* PrintArrayCount(uint8_t* aIndex, std::string_view aName, uint32_t aCount, PrintType aPrintType = Decimal)
     {
-        std::cout << aName << " ("<< aCount << ")";
+        if(aPrintType!=None) std::cout << aName << " ("<< aCount << ")";
         for(uint32_t i = 0;i<aCount;++i)
         {
-            std::cout << "\t" << reinterpret_cast<T*>(aIndex)[0];
+            if(aPrintType!=None)
+            {
+                switch(aPrintType)
+                {
+                case Binary:
+                    std::cout << "\t" << std::bitset<sizeof(T)*8>(reinterpret_cast<T*>(aIndex)[0]);
+                    break;
+                case Decimal:
+                    std::cout << "\t" << std::dec << reinterpret_cast<T*>(aIndex)[0];
+                    break;
+                case Hexadecimal:
+                    std::cout << "\t" << std::hex << reinterpret_cast<T*>(aIndex)[0];
+                    std::cout << std::dec;
+                    break;
+                }
+            }
             aIndex+=sizeof(T);
         }
-        std::cout << std::endl;
+        if(aPrintType!=None) std::cout << std::endl;
         return aIndex;
     }
 
     template<>
-    uint8_t* PrintArrayCount<uint8_t>(uint8_t* aIndex, std::string_view aName, uint32_t aCount)
+    uint8_t* PrintArrayCount<uint8_t>(uint8_t* aIndex, std::string_view aName, uint32_t aCount, PrintType aPrintType)
     {
-        std::cout << aName << " ("<< aCount << ")";
+        if(aPrintType!=None) std::cout << aName << " ("<< aCount << ")";
         for(uint32_t i = 0;i<aCount;++i)
         {
-            std::cout << " " << static_cast<uint32_t>(aIndex[0]);
+            if(aPrintType!=None)
+            {
+                switch(aPrintType)
+                {
+                case Binary:
+                    std::cout << "\t" << std::bitset<8>(static_cast<uint32_t>(aIndex[0]));
+                    break;
+                case Decimal:
+                    std::cout << " " << std::dec << static_cast<uint32_t>(aIndex[0]);
+                    break;
+                case Hexadecimal:
+                    std::cout << " " << std::hex << static_cast<uint32_t>(aIndex[0]);
+                    std::cout << std::dec;
+                    break;
+                }
+            }
             aIndex+=1;
         }
-        std::cout << std::endl;
+        if(aPrintType!=None)  std::cout << std::endl;
         return aIndex;
     }
 
     template<class T>
     uint8_t* PrintSingle(uint8_t* aIndex, std::string_view aName, T* aOutput = nullptr)
     {
-        std::cout << aName << "\t" << reinterpret_cast<T*>(aIndex)[0] << std::endl;
+        if(bPrint) std::cout << aName << "\t" << reinterpret_cast<T*>(aIndex)[0] << std::endl;
         if(aOutput){*aOutput = reinterpret_cast<T*>(aIndex)[0];}
         aIndex+=sizeof(T);
         return aIndex;
@@ -215,24 +254,26 @@ namespace ControlModding
         index = PrintArrayCount<float>(index,"Up Vector",3);  // Up Vector
         index = PrintArray<float>(index,"Unknown Variable Array");
         index = PrintArrayCount<float>(index,"Unknown Fixed Array",11);
-        index = PrintSingle<uint32_t>(index, "Model Count");
+        index = PrintSingle<uint32_t>(index, "LOD Count");
+
         uint32_t material_count;
         index = PrintSingle<uint32_t>(index, "Material Count", &material_count);
-
 
         //---- Materials
         for(uint32_t i = 0; i < material_count;++i )
         {
-            std::cout << "Location " << std::hex << static_cast<size_t>(index - buffer.data()) << std::endl; std::cout << std::dec;
+            std::cout << "Location " << std::hex << static_cast<size_t>(index - buffer.data()) << std::endl;
             index = PrintSingle<uint32_t>(index,"Unknown Uint32");
             index = PrintArrayCount<uint8_t>(index,"Unknown Fixed Array",8);
+            std::cout << std::dec;
 
             index = PrintArray<char>(index,"Material Name");
             index = PrintArray<char>(index,"Material Type");
             index = PrintArray<char>(index,"Material Path");
 
-            index = PrintArrayCount<uint32_t>(index,"Unknown Fixed Array",6);
+            index = PrintArrayCount<uint32_t>(index,"Unknown, Fixed single bit per entry always?",6);
 
+            bPrint = false;
             uint32_t UniformCount;
             index = PrintSingle<uint32_t>(index,"Uniform Count",&UniformCount);
 
@@ -266,6 +307,7 @@ namespace ControlModding
                     break;
                 }
             }
+            bPrint = true;
         }
 
         uint32_t material_map{};
@@ -285,26 +327,21 @@ namespace ControlModding
         index = PrintSingle<uint32_t>(index,"SubMesh Count 1",&submesh_count1);
         for(uint32_t i = 0; i<submesh_count1;++i)
         {
-            index = PrintSingle<uint32_t>(index,std::string("LOD ")+std::to_string(i+1));
+            index = PrintSingle<uint32_t>(index,std::string("SM 1 Mesh ")+std::to_string(i)+std::string(" LOD"));
             index = PrintSingle<uint32_t>(index,"Vertex Count");
             index = PrintSingle<uint32_t>(index,"Triangle Count");
             index = PrintSingle<uint32_t>(index,"Vertex Attribute Offset");
             index = PrintSingle<uint32_t>(index,"Vertex Buffer Offset");
             index = PrintSingle<uint32_t>(index,"Index Buffer Offset");
 
-            std::cout << std::hex;
-            index = PrintArrayCount<uint32_t>(index,"Unknown",12);
-            std::cout << std::dec;
+            index = PrintArrayCount<uint8_t>(index,"Unknown",12*4,Decimal);
 
             uint16_t attribute_count;
             index = PrintSingle<uint16_t>(index,"Attribute Count", &attribute_count);
             uint16_t attribute_size;
-            index = PrintSingle<uint16_t>(index,"Attribute Size", &attribute_size);
+            index = PrintSingle<uint16_t>(index,"NOT Attribute Size", &attribute_size);
         
-            std::cout << std::hex;
-            PrintArrayCount<uint32_t>(index,"ParamBlockHashes",attribute_count);
-            index = PrintArrayCount<uint16_t>(index,"ParamBlockHashes",attribute_count*attribute_size);
-            std::cout << std::dec;
+            index = PrintArrayCount<uint8_t>(index,"ParamBlockHashes", attribute_count*4, Hexadecimal);
 
             index = PrintSingle<uint32_t>(index,"Unknown");
             index = PrintSingle<int16_t>(index,"Unknown");
@@ -315,28 +352,32 @@ namespace ControlModding
         index = PrintSingle<uint32_t>(index,"SubMesh Count 2",&submesh_count2);
         for(uint32_t i = 0; i< submesh_count2;++i)
         {
-            index = PrintSingle<uint32_t>(index,std::string("LOD ")+std::to_string(i+1));
+            index = PrintSingle<uint32_t>(index,std::string("SM 2 Mesh ")+std::to_string(i)+std::string(" LOD"));
             index = PrintSingle<uint32_t>(index,"Vertex Count");
             index = PrintSingle<uint32_t>(index,"Triangle Count");
             index = PrintSingle<uint32_t>(index,"Vertex Attribute Offset");
             index = PrintSingle<uint32_t>(index,"Vertex Buffer Offset");
             index = PrintSingle<uint32_t>(index,"Index Buffer Offset");
 
-            index = PrintArrayCount<uint32_t>(index,"Unknown",12);
+            index = PrintArrayCount<uint8_t>(index,"Unknown",12*4,Decimal);
 
-            uint16_t table_var_count;
-            index = PrintSingle<uint16_t>(index,"Table Var Count",&table_var_count);
-            index = PrintSingle<uint16_t>(index,"Unknown padding maybe?");
+            PrintSingle<uint32_t>(index,"Attribute Count 32bit");
+
+            uint16_t attribute_count;
+            index = PrintSingle<uint16_t>(index,"Attribute Count", &attribute_count);
+            uint16_t attribute_size;
+            index = PrintSingle<uint16_t>(index,"NOT Attribute Size", &attribute_size);
         
-            uint32_t ParamBlockHashes;
-            index = PrintArrayCount<uint32_t>(index,"ParamBlockHashes",table_var_count);
+            index = PrintArrayCount<uint8_t>(index,"ParamBlockHashes", attribute_count * 4, Hexadecimal);
 
             index = PrintSingle<uint32_t>(index,"Unknown");
             index = PrintSingle<int16_t>(index,"Unknown");
             index = PrintSingle<float>(index,"Unknown");
         }
-        std::cout << "File Size " << buffer.size() << " Index Location " << static_cast<size_t>(index - buffer.data()) << std::endl;
 
+        index = PrintArray<uint32_t>(index, "Unknown Array, usually zero");
+        index = PrintSingle<float>(index,"Unknown Float");
+        index = PrintArray<float>(index, "Unknown Array of floats");
         return 0;
     }
 }
