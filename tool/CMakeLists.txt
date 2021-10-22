@@ -12,7 +12,15 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+
+find_package(SQLite3)
+
 set(CONTROL_TOOL_HEADERS Tool.h MeshTool.h)
 set(CONTROL_TOOL_SOURCES Main.cpp MeshTool.cpp)
 
 add_executable(control-tool ${CONTROL_TOOL_HEADERS} ${CONTROL_TOOL_SOURCES})
+if(SQLite3_FOUND)
+    target_compile_options(control-tool PRIVATE "-DUSE_SQLITE")
+    target_include_directories(control-tool PRIVATE ${SQLite3_INCLUDE_DIRS})
+    target_link_libraries(control-tool ${SQLite3_LIBRARIES})
+endif()

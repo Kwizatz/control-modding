@@ -31,6 +31,9 @@ namespace ControlModding
         void ProcessArgs ( int argc, char** argv );
         std::string mInputFile;
         std::string mOutputFile;
+#ifdef USE_SQLITE
+        std::string mSqliteFile;
+#endif
     };
 }
 #endif

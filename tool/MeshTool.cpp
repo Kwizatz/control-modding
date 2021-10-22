@@ -23,9 +23,12 @@ limitations under the License.
 #include <string_view>
 #include <cstring>
 #include <bitset>
+#ifdef USE_SQLITE
+#include <sqlite3.h>
+#endif
+
 #include "BinFBX.h"
 #include "MeshTool.h"
-
 namespace ControlModding
 {
     bool bPrint = true;
@@ -62,6 +65,13 @@ namespace ControlModding
                         i++;
                         mOutputFile = argv[i];
                     }
+#ifdef USE_SQLITE
+                    else if ( strncmp ( &argv[i][2], "sqlite", sizeof ( "sqlite" ) ) == 0 )
+                    {
+                        i++;
+                        mSqliteFile = argv[i];
+                    }
+#endif
                 }
                 else
                 {
@@ -75,6 +85,12 @@ namespace ControlModding
                         i++;
                         mOutputFile = argv[i];
                         break;
+#ifdef USE_SQLITE
+                    case 's':
+                        i++;
+                        mSqliteFile = argv[i];
+                        break;
+#endif
                     }
                 }
             }
@@ -224,6 +240,25 @@ namespace ControlModding
             std::cout << "Not a BinFBX file " << binfbx->Magick << std::endl;
             return -1;
         }        
+#if 0
+#ifdef USE_SQLITE
+        sqlite3 *db;
+        if(!mSqliteFile.empty())
+        {
+            sqlite3_stmt *res;
+            
+            int rc = sqlite3_open(mSqliteFile.c_str(), &db);
+            
+            if (rc != SQLITE_OK) 
+            {
+                
+                std::cerr << "Cannot open database: " << sqlite3_errmsg(db) << std::endl;
+                sqlite3_close(db);                
+                return 1;
+            }
+        }
+#endif
+#endif
 
         index = PrintSingle<uint32_t>(index,"Magick");
         index = PrintSingle<uint32_t>(index,"Attribute Buffer Size");
@@ -237,17 +272,61 @@ namespace ControlModding
         uint32_t JointCount = *reinterpret_cast<uint32_t*>(index);
         std::cout << "Joint Count " << JointCount << std::endl;
         index += sizeof(uint32_t);
+#if 0
+#ifdef USE_SQLITE
+        //std::cout << "Working on " << mInputFile << std::endl;
+        char *errmsg{nullptr};
+        int rc = sqlite3_exec(
+        db,
+        R"(CREATE TABLE IF NOT EXISTS general (
+            file_path TEXT PRIMARY KEY,
+            attribute_buffer_size INTEGER NOT NULL,
+            vertex_buffer_size INTEGER NOT NULL,
+            index_count INTEGER NOT NULL,
+            index_size INTEGER NOT NULL,
+            joint_count INTEGER NOT NULL
+        );)",
+        nullptr,//int (*callback)(void*,int,char**,char**),  /* Callback function */
+        nullptr,                                             /* 1st argument to callback */
+        &errmsg);
 
+        if(errmsg != nullptr)
+        {
+            std::cerr << "Table creation Failed: " << errmsg << std::endl;
+            sqlite3_free(errmsg);
+        }
+
+        std::stringstream insert;
+        insert << "INSERT OR REPLACE INTO general (file_path, attribute_buffer_size, vertex_buffer_size, index_count, index_size, joint_count) values " <<
+        "(\"" << mInputFile << "\"," << binfbx->AttributeBufferSize << "," << binfbx->VertexBufferSize << "," << binfbx->IndexCount << "," << binfbx->IndexSize << ","<< JointCount <<");";
+
+        rc = sqlite3_exec(
+        db,
+        insert.str().c_str(),
+        nullptr,
+        nullptr,
+        &errmsg);
+
+        if(errmsg != nullptr)
+        {
+            std::cerr << "Insert Failed: " << errmsg << std::endl;
+            sqlite3_free(errmsg);
+        }
+
+        sqlite3_close(db);
+        return 0;
+#endif
+#endif
         for(uint32_t i = 0; i < JointCount; ++i)
         {
             index = PrintArray<char>(index,"Joint Name");
-            index = PrintArrayCount<float>(index,"Matrix 1",4);
-            index = PrintArrayCount<float>(index,"Matrix 2",4);
-            index = PrintArrayCount<float>(index,"Matrix 3",4);
-            index = PrintArrayCount<float>(index,"Matrix 4",4);
+            index = PrintArrayCount<float>(index,"Matrix 1",3);
+            index = PrintArrayCount<float>(index,"Matrix 2",3);
+            index = PrintArrayCount<float>(index,"Matrix 3",3);
+            index = PrintArrayCount<float>(index,"Matrix 4",3);
+            index = PrintArrayCount<float>(index,"Unknown",4);
             index = PrintSingle<uint32_t>(index,"Parent Index");
         }
-
 
         std::cout << "Location " << std::hex << static_cast<size_t>(index - buffer.data()) << std::endl; std::cout << std::dec;
 
