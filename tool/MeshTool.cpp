@@ -22,6 +22,7 @@ limitations under the License.
 #include <vector>
 #include <string_view>
 #include <cstring>
+#include <cmath>
 #include <bitset>
 #ifdef USE_SQLITE
 #include <sqlite3.h>
@@ -319,13 +320,13 @@ namespace ControlModding
 #endif
         for(uint32_t i = 0; i < JointCount; ++i)
         {
-            index = PrintArray<char>(index,"Joint Name");
+            index = PrintArray<char>(index,"Joint Index " + std::to_string(i) + " Name");
             index = PrintArrayCount<float>(index,"Matrix 1",3);
             index = PrintArrayCount<float>(index,"Matrix 2",3);
             index = PrintArrayCount<float>(index,"Matrix 3",3);
             index = PrintArrayCount<float>(index,"Matrix 4",3);
             index = PrintArrayCount<float>(index,"Unknown",4);
-            index = PrintSingle<uint32_t>(index,"Parent Index");
+            index = PrintSingle<int32_t>(index,"Parent Index");
         }
 
         std::cout << "Location " << std::hex << static_cast<size_t>(index - buffer.data()) << std::endl; std::cout << std::dec;
@@ -352,7 +353,7 @@ namespace ControlModding
 
             index = PrintArrayCount<uint32_t>(index,"Unknown, Fixed single bit per entry always?",6);
 
-            bPrint = false;
+            //bPrint = false;
             uint32_t UniformCount;
             index = PrintSingle<uint32_t>(index,"Uniform Count",&UniformCount);
 
