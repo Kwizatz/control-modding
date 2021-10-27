@@ -42,6 +42,56 @@ namespace ControlModding
         Hexadecimal,
         Decimal,
     };
+
+    std::ostream& operator<<(std::ostream& os, const AttributeInfo& aAttributeInfo){
+        os << "\nZero " << static_cast<uint32_t>(aAttributeInfo.Zero) << "\nBufferLocation " << static_cast<uint32_t>(aAttributeInfo.BufferLocation) << "\nType ";
+
+        switch(aAttributeInfo.Type)
+        {
+        case 0x4:
+            os << "B8G8R8A8_UNORM";
+            break;
+        case 0x7:
+         os << "R16G16_SINT";
+         break;
+        case 0x8:
+         os << "R16G16B16A16_SINT";
+         break;
+        case 0xd:
+         os << "R16G16B16A16_UINT";
+         break;
+        case 0x5:
+         os << "R8G8B8A8_UINT";
+         break;
+        default:
+            os << "Unknown ("<< static_cast<uint32_t>(aAttributeInfo.Type) <<")";
+        }
+
+        os << "\nUsage ";
+        switch(aAttributeInfo.Usage)
+        {
+        case 0x1:
+            os << "Normal";
+            break;
+        case 0x2:
+            os << "TexCoord";
+            break;
+        case 0x3:
+            os << "Tangent";
+            break;
+        case 0x5:
+            os << "Index";
+            break;
+        case 0x6:
+            os << "Weight";
+            break;
+        default:
+            os << "Unknown ("<< static_cast<uint32_t>(aAttributeInfo.Usage) <<")";
+            break;
+        }
+        return os;
+    }
+
     void MeshTool::ProcessArgs ( int argc, char** argv )
     {
         if ( argc < 2 || ( strcmp ( argv[1], "binfbx" ) != 0 ) )
@@ -421,7 +471,7 @@ namespace ControlModding
             uint16_t attribute_size;
             index = PrintSingle<uint16_t>(index,"NOT Attribute Size", &attribute_size);
         
-            index = PrintArrayCount<uint8_t>(index,"ParamBlockHashes", attribute_count*4, Hexadecimal);
+            index = PrintArrayCount<AttributeInfo>(index,"Attribute Info", attribute_count);
 
             index = PrintSingle<uint32_t>(index,"Unknown");
             index = PrintSingle<int16_t>(index,"Unknown");
@@ -441,16 +491,14 @@ namespace ControlModding
 
             index = PrintArrayCount<uint8_t>(index,"Unknown",12*4,Decimal);
 
-            PrintSingle<uint32_t>(index,"Attribute Count 32bit");
-
             uint16_t attribute_count;
             index = PrintSingle<uint16_t>(index,"Attribute Count", &attribute_count);
             uint16_t attribute_size;
             index = PrintSingle<uint16_t>(index,"NOT Attribute Size", &attribute_size);
-        
-            index = PrintArrayCount<uint8_t>(index,"ParamBlockHashes", attribute_count * 4, Hexadecimal);
+                    
+            index = PrintArrayCount<AttributeInfo>(index,"Attribute Info", attribute_count);
 
-            index = PrintSingle<uint32_t>(index,"Unknown");
+            index = PrintSingle<int32_t>(index,"Unknown");
             index = PrintSingle<int16_t>(index,"Unknown");
             index = PrintSingle<float>(index,"Unknown");
         }
