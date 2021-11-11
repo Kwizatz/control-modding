@@ -44,10 +44,13 @@ namespace ControlModding
     };
 
     std::ostream& operator<<(std::ostream& os, const AttributeInfo& aAttributeInfo){
-        os << "\nZero " << static_cast<uint32_t>(aAttributeInfo.Zero) << "\nBufferLocation " << static_cast<uint32_t>(aAttributeInfo.BufferLocation) << "\nType ";
+        os << "\nBufferLocation " << static_cast<uint32_t>(aAttributeInfo.BufferLocation) << "\nType ";
 
         switch(aAttributeInfo.Type)
         {
+        case 0x2:
+            os << "R32G32B32_FLOAT";
+            break;
         case 0x4:
             os << "B8G8R8A8_UNORM";
             break;
@@ -67,9 +70,12 @@ namespace ControlModding
             os << "Unknown ("<< static_cast<uint32_t>(aAttributeInfo.Type) <<")";
         }
 
-        os << "\nUsage ";
+        os << "\nSemantic ";
         switch(aAttributeInfo.Usage)
         {
+        case 0x0:
+            os << "Position";
+            break;
         case 0x1:
             os << "Normal";
             break;
@@ -89,6 +95,7 @@ namespace ControlModding
             os << "Unknown ("<< static_cast<uint32_t>(aAttributeInfo.Usage) <<")";
             break;
         }
+        os << "\nZero " << static_cast<uint32_t>(aAttributeInfo.Zero) << "\n";
         return os;
     }
 
@@ -276,6 +283,42 @@ namespace ControlModding
         return aIndex;
     }
 
+    template<>
+    uint8_t* PrintSingle<uint8_t>(uint8_t* aIndex, std::string_view aName, uint8_t* aOutput)
+    {
+        if(bPrint) std::cout << aName << "\t" << static_cast<size_t>(*aIndex) << std::endl;
+        if(aOutput){*aOutput = *aIndex;}
+        aIndex+=sizeof(uint8_t);
+        return aIndex;
+    }
+
+
+    uint8_t* PrintMesh(uint8_t* aIndex, std::string_view aName)
+    {
+            aIndex = PrintSingle<uint32_t>(aIndex, aName);
+            aIndex = PrintSingle<uint32_t>(aIndex,"Vertex Count");
+            aIndex = PrintSingle<uint32_t>(aIndex,"Triangle Count");
+            aIndex = PrintSingle<uint32_t>(aIndex,"Vertex Attribute Offset");
+            aIndex = PrintSingle<uint32_t>(aIndex,"Vertex Buffer Offset");
+            aIndex = PrintSingle<uint32_t>(aIndex,"Index Buffer Offset");
+
+            aIndex = PrintSingle<int32_t>(aIndex,"Unknown Int");
+            aIndex = PrintArrayCount<int32_t>(aIndex,"Bounding Sphere", 4);
+            aIndex = PrintArrayCount<int32_t>(aIndex,"Bounding Box", 6);
+
+            aIndex = PrintSingle<int32_t>(aIndex,"Vertex Format Int32 (Unknown)");
+            uint8_t vertex_format_count{};
+            aIndex = PrintSingle<uint8_t>(aIndex,"Vertex Format Count (byte)", &vertex_format_count);
+            aIndex = PrintArrayCount<AttributeInfo>(aIndex,"Vertex Format", vertex_format_count);
+
+            aIndex = PrintSingle<int32_t>(aIndex,"Unknown Int");
+            aIndex = PrintSingle<float>(aIndex,"Unknown Float");
+            aIndex = PrintSingle<uint8_t>(aIndex,"Unknown Byte as Bool");
+            aIndex = PrintSingle<float>(aIndex,"Unknown Float");
+
+            return aIndex;
+    }
+
     int MeshTool::operator() ( int argc, char** argv )
     {
         ProcessArgs ( argc, argv );
@@ -375,15 +418,20 @@ namespace ControlModding
             index = PrintArrayCount<float>(index,"Matrix 2",3);
             index = PrintArrayCount<float>(index,"Matrix 3",3);
             index = PrintArrayCount<float>(index,"Matrix 4",3);
-            index = PrintArrayCount<float>(index,"Unknown",4);
+            index = PrintArrayCount<float>(index,"Envelope Vector",3);
+            index = PrintSingle<float>(index,"Envelope Radius");
             index = PrintSingle<int32_t>(index,"Parent Index");
         }
 
-        std::cout << "Location " << std::hex << static_cast<size_t>(index - buffer.data()) << std::endl; std::cout << std::dec;
+        index = PrintArrayCount<int32_t>(index,"Unknown Ints", 2);
+        index = PrintSingle<float>(index, "Unknown Float");
+        index = PrintArray<float>(index,"Unknown Depth Buffer");
+        index = PrintSingle<float>(index, "Unknown Float");
+        index = PrintArrayCount<float>(index,"Unknown Vec3", 3);
+        index = PrintSingle<float>(index, "Unknown Float");
+        index = PrintArrayCount<float>(index,"Unknown Vec3", 3);
+        index = PrintArrayCount<float>(index,"Unknown Vec3", 3);
 
-        index = PrintArrayCount<float>(index,"Up Vector",3);  // Up Vector
-        index = PrintArray<float>(index,"Unknown Variable Array");
-        index = PrintArrayCount<float>(index,"Unknown Fixed Array",11);
         index = PrintSingle<uint32_t>(index, "LOD Count");
 
         uint32_t material_count;
@@ -392,16 +440,15 @@ namespace ControlModding
         //---- Materials
         for(uint32_t i = 0; i < material_count;++i )
         {
-            std::cout << "Location " << std::hex << static_cast<size_t>(index - buffer.data()) << std::endl;
-            index = PrintSingle<uint32_t>(index,"Unknown Uint32");
-            index = PrintArrayCount<uint8_t>(index,"Unknown Fixed Array",8);
+            index = PrintSingle<uint32_t>(index,"Material File Magick Always (7)");
+            index = PrintArrayCount<uint8_t>(index,"Material Global ID",8);
             std::cout << std::dec;
 
             index = PrintArray<char>(index,"Material Name");
             index = PrintArray<char>(index,"Material Type");
             index = PrintArray<char>(index,"Material Path");
 
-            index = PrintArrayCount<uint32_t>(index,"Unknown, Fixed single bit per entry always?",6);
+            index = PrintArrayCount<uint32_t>(index,"Unknown Array of 6", 6);
 
             //bPrint = false;
             uint32_t UniformCount;
@@ -457,50 +504,14 @@ namespace ControlModding
         index = PrintSingle<uint32_t>(index,"SubMesh Count 1",&submesh_count1);
         for(uint32_t i = 0; i<submesh_count1;++i)
         {
-            index = PrintSingle<uint32_t>(index,std::string("SM 1 Mesh ")+std::to_string(i)+std::string(" LOD"));
-            index = PrintSingle<uint32_t>(index,"Vertex Count");
-            index = PrintSingle<uint32_t>(index,"Triangle Count");
-            index = PrintSingle<uint32_t>(index,"Vertex Attribute Offset");
-            index = PrintSingle<uint32_t>(index,"Vertex Buffer Offset");
-            index = PrintSingle<uint32_t>(index,"Index Buffer Offset");
-
-            index = PrintArrayCount<uint8_t>(index,"Unknown",12*4,Decimal);
-
-            uint16_t attribute_count;
-            index = PrintSingle<uint16_t>(index,"Attribute Count", &attribute_count);
-            uint16_t attribute_size;
-            index = PrintSingle<uint16_t>(index,"NOT Attribute Size", &attribute_size);
-        
-            index = PrintArrayCount<AttributeInfo>(index,"Attribute Info", attribute_count);
-
-            index = PrintSingle<uint32_t>(index,"Unknown");
-            index = PrintSingle<int16_t>(index,"Unknown");
-            index = PrintSingle<float>(index,"Unknown");
+            index = PrintMesh(index,std::string("SM 1 Mesh ")+std::to_string(i)+std::string(" LOD"));
         }
 
         uint32_t submesh_count2;
         index = PrintSingle<uint32_t>(index,"SubMesh Count 2",&submesh_count2);
         for(uint32_t i = 0; i< submesh_count2;++i)
         {
-            index = PrintSingle<uint32_t>(index,std::string("SM 2 Mesh ")+std::to_string(i)+std::string(" LOD"));
-            index = PrintSingle<uint32_t>(index,"Vertex Count");
-            index = PrintSingle<uint32_t>(index,"Triangle Count");
-            index = PrintSingle<uint32_t>(index,"Vertex Attribute Offset");
-            index = PrintSingle<uint32_t>(index,"Vertex Buffer Offset");
-            index = PrintSingle<uint32_t>(index,"Index Buffer Offset");
-
-            index = PrintArrayCount<uint8_t>(index,"Unknown",12*4,Decimal);
-
-            uint16_t attribute_count;
-            index = PrintSingle<uint16_t>(index,"Attribute Count", &attribute_count);
-            uint16_t attribute_size;
-            index = PrintSingle<uint16_t>(index,"NOT Attribute Size", &attribute_size);
-                    
-            index = PrintArrayCount<AttributeInfo>(index,"Attribute Info", attribute_count);
-
-            index = PrintSingle<int32_t>(index,"Unknown");
-            index = PrintSingle<int16_t>(index,"Unknown");
-            index = PrintSingle<float>(index,"Unknown");
+            index = PrintMesh(index,std::string("SM 1 Mesh ")+std::to_string(i)+std::string(" LOD"));
         }
 
         index = PrintArray<uint32_t>(index, "Unknown Array, usually zero");
