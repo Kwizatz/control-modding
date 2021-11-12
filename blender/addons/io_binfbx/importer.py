@@ -72,23 +72,28 @@ class BINFBX_OT_importer(bpy.types.Operator):
             for i in range(JointCount):
                 JointName = file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
                 matrix = struct.unpack('12f',file.read(4*12))
-                struct.unpack('4f',file.read(4*4))
+                tail = mathutils.Vector(struct.unpack('3f',file.read(12)))
+                radius = struct.unpack('f',file.read(4))[0]
                 parent = struct.unpack('i',file.read(4))
                 rotation = mathutils.Matrix(((matrix[0], matrix[1], matrix[2], 0.0), (matrix[3], matrix[4], matrix[5], 0.0), (matrix[6], matrix[7], matrix[8], 0.0), (0.0,0.0,0.0, 1.0)))
-                #rotation = mathutils.Matrix(((matrix[0], matrix[3], matrix[6], 0.0), (matrix[1], matrix[4], matrix[7], 0.0), (matrix[2], matrix[5], matrix[8], 0.0), (0.0,0.0,0.0, 1.0)))
                 translation = mathutils.Matrix.Translation((matrix[9], matrix[10], matrix[11]))
                 transform = rotation @ translation
-                joints.append([JointName, transform , parent[0]])
+                joints.append([JointName, transform , parent[0], tail, radius])
             # Pass 2 - Create Bones
             for joint in joints:
                 armature_data.edit_bones.new(joint[0])
             # Pass 3 - Assign Parent and Matrix
             for joint_index in range(JointCount):
-                armature_data.edit_bones[joint_index].length = 0.01
                 if joints[joint_index][2] >= 0:
                     armature_data.edit_bones[joint_index].parent = armature_data.edit_bones[joints[joint_index][2]]
                 armature_data.edit_bones[joint_index].matrix = joints[joint_index][1]
-
+                # Avoid zero length bones as well as unused radius and tail going to the origin 
+                if (joints[joint_index][4] == 0.0 and joints[joint_index][3] == mathutils.Vector((0.0,0.0,0.0))) or (armature_data.edit_bones[joint_index].head == -joints[joint_index][3]):
+                    armature_data.edit_bones[joint_index].length = 0.01
+                else:
+                    armature_data.edit_bones[joint_index].tail = -joints[joint_index][3]
+                    armature_data.edit_bones[joint_index].tail_radius = joints[joint_index][4]
+                    armature_data.edit_bones[joint_index].head_radius = joints[joint_index][4]
             bpy.ops.object.mode_set(mode='OBJECT')
 
         file.close()

@@ -37,5 +37,9 @@ def register():
     bpy.utils.register_class(importer.BINFBX_OT_importer)
     bpy.types.TOPBAR_MT_file_import.append(binfbx_import_menu_func)
 
+def unregister():
+    bpy.utils.unregister_class(importer.BINFBX_OT_importer)
+    bpy.types.TOPBAR_MT_file_import.remove(binfbx_import_menu_func)
+
 if __name__ == "__main__":
     register()
