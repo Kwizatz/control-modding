@@ -498,7 +498,7 @@ namespace ControlModding
             index =  PrintArrayCount<uint32_t>(index,"Material Map",material_map);
         }
 
-        index = PrintArray<uint32_t>(index,"Material Map");
+        index = PrintArray<uint32_t>(index, "Unknown Int Array");
 
         uint32_t submesh_count1;
         index = PrintSingle<uint32_t>(index,"SubMesh Count 1",&submesh_count1);

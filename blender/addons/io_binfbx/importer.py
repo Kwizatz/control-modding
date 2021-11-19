@@ -22,6 +22,13 @@ from multiprocessing import Pool
 from multiprocessing.dummy import Pool as ThreadPool, Lock as ThreadLock
 
 MAGICK = 0x2e
+FLOAT = 0x00
+RANGE = 0x01
+COLOR = 0x03
+VECTOR = 0x02
+TEXTUREMAP = 0x09
+TEXTURESAMPLER = 0x08
+BOOLEAN = 0x0C
 
 class BINFBX_OT_importer(bpy.types.Operator):
 
@@ -51,7 +58,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
         file.read(AttributeBufferSize + VertexBufferSize + (IndexCount * IndexSize))
 
         JointCount = struct.unpack('I',file.read(4))[0]
-
+        # Read Skeleton
         print("Joint Count:", JointCount)
 
         if JointCount > 0:
@@ -95,6 +102,75 @@ class BINFBX_OT_importer(bpy.types.Operator):
                     armature_data.edit_bones[joint_index].tail_radius = joints[joint_index][4]
                     armature_data.edit_bones[joint_index].head_radius = joints[joint_index][4]
             bpy.ops.object.mode_set(mode='OBJECT')
+
+        # Skip Unknown Data
+        struct.unpack("II",file.read(8))
+        struct.unpack("f",file.read(4))
+        ( count ) = struct.unpack("I",file.read(4))
+        for i in range(count):
+            struct.unpack("f",file.read(4))
+
+        struct.unpack("f",file.read(4))
+        struct.unpack("fff",file.read(12))
+        struct.unpack("f",file.read(4))
+        struct.unpack("fff",file.read(12))
+        struct.unpack("fff",file.read(12))
+
+        # LOD Count
+        struct.unpack("I",file.read(4))
+
+        # Read Materials
+        (MaterialCount) = struct.unpack('I',file.read(4))
+        for i in range(MaterialCount):
+            # Material Magick
+            struct.unpack("I",file.read(4))
+            # Material ID
+            struct.unpack("8B",file.read(8))
+            
+            #Material Name
+            file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
+            #Material Type
+            file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
+            #Material Path
+            file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
+
+            struct.unpack("6I",file.read(24))
+
+            (UniformCount) = struct.unpack('I',file.read(4))
+
+
+            for i in range(UniformCount):
+                #Uniform Name
+                file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
+                # Uniform Type
+                ( UniformType ) = struct.unpack("I",file.read(4))
+            
+                if UniformType == FLOAT:
+                    struct.unpack("f",file.read(4))
+                elif UniformType == RANGE:
+                    struct.unpack("2f",file.read(8))
+                elif UniformType == COLOR:
+                    struct.unpack("4f",file.read(16))
+                elif UniformType == VECTOR:
+                    struct.unpack("f",file.read(12))
+                elif UniformType == TEXTUREMAP:
+                    file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
+                elif UniformType == TEXTURESAMPLER:
+                    pass
+                elif UniformType == BOOLEAN:
+                    struct.unpack("I",file.read(4))
+
+        (MaterialMapCount) = struct.unpack('I',file.read(4))
+        # Material Map
+        struct.unpack(str(MaterialMapCount) + 'I',file.read(MaterialMapCount*4))
+
+        (AlternateMaterialMapCount) = struct.unpack('I',file.read(4))
+        for i in range(AlternateMaterialMapCount):
+            file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
+            struct.unpack(str(MaterialMapCount) + 'I',file.read(MaterialMapCount*4))
+
+        # Unknown Int Array
+        struct.unpack(str(MaterialMapCount) + 'I',file.read(MaterialMapCount*4))
 
         file.close()
         bpy.context.view_layer.update()
