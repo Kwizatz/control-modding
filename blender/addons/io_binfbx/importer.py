@@ -30,6 +30,29 @@ TEXTUREMAP = 0x09
 TEXTURESAMPLER = 0x08
 BOOLEAN = 0x0C
 
+POSITION = 0x0
+NORMAL   = 0x1
+TEXCOORD = 0x2
+TANGENT  = 0x3
+INDEX    = 0x5
+WEIGHT   = 0x6
+
+R32G32B32_FLOAT   = 0x2
+B8G8R8A8_UNORM    = 0x4
+R8G8B8A8_UINT     = 0x5
+R16G16_SINT       = 0x7
+R16G16B16A16_SINT = 0x8
+R16G16B16A16_UINT = 0xd
+
+Format = {
+    R32G32B32_FLOAT   : '3f',
+    B8G8R8A8_UNORM    : '4B',
+    R8G8B8A8_UINT     : '4B',
+    R16G16_SINT       : '2h',
+    R16G16B16A16_SINT : '4h',
+    R16G16B16A16_UINT : '4h'
+}
+
 class BINFBX_OT_importer(bpy.types.Operator):
 
     '''Imports a binfbx file'''
@@ -54,10 +77,13 @@ class BINFBX_OT_importer(bpy.types.Operator):
             return {'CANCELLED'}
 
         (AttributeBufferSize, VertexBufferSize, IndexCount, IndexSize) = struct.unpack("IIII",file.read(16))
-        # Move Past the Buffers
-        file.read(AttributeBufferSize + VertexBufferSize + (IndexCount * IndexSize))
+        # Read Buffers
+        #file.read(AttributeBufferSize + VertexBufferSize + (IndexCount * IndexSize))
+        VertexBuffer1 = file.read(AttributeBufferSize)
+        VertexBuffer2 = file.read(VertexBufferSize)
+        IndexBuffer   = file.read(IndexCount * IndexSize)
 
-        JointCount = struct.unpack('I',file.read(4))[0]
+        ( JointCount, ) = struct.unpack('I',file.read(4))
         # Read Skeleton
         print("Joint Count:", JointCount)
 
@@ -106,7 +132,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
         # Skip Unknown Data
         struct.unpack("II",file.read(8))
         struct.unpack("f",file.read(4))
-        ( count ) = struct.unpack("I",file.read(4))
+        ( count, ) = struct.unpack("I",file.read(4))
         for i in range(count):
             struct.unpack("f",file.read(4))
 
@@ -120,8 +146,10 @@ class BINFBX_OT_importer(bpy.types.Operator):
         struct.unpack("I",file.read(4))
 
         # Read Materials
-        (MaterialCount) = struct.unpack('I',file.read(4))
+        ( MaterialCount, ) = struct.unpack('I',file.read(4))
+        print("Material Count:", MaterialCount)
         for i in range(MaterialCount):
+            print("Material", i)
             # Material Magick
             struct.unpack("I",file.read(4))
             # Material ID
@@ -136,15 +164,15 @@ class BINFBX_OT_importer(bpy.types.Operator):
 
             struct.unpack("6I",file.read(24))
 
-            (UniformCount) = struct.unpack('I',file.read(4))
+            ( UniformCount, ) = struct.unpack('I',file.read(4))
 
-
-            for i in range(UniformCount):
+            print("Uniform Count:", UniformCount)
+            for j in range(UniformCount):
                 #Uniform Name
                 file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
                 # Uniform Type
-                ( UniformType ) = struct.unpack("I",file.read(4))
-            
+                ( UniformType, ) = struct.unpack("I",file.read(4))
+                print("Uniform", j, "Type", UniformType)
                 if UniformType == FLOAT:
                     struct.unpack("f",file.read(4))
                 elif UniformType == RANGE:
@@ -152,7 +180,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
                 elif UniformType == COLOR:
                     struct.unpack("4f",file.read(16))
                 elif UniformType == VECTOR:
-                    struct.unpack("f",file.read(12))
+                    struct.unpack("3f",file.read(12))
                 elif UniformType == TEXTUREMAP:
                     file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
                 elif UniformType == TEXTURESAMPLER:
@@ -160,18 +188,69 @@ class BINFBX_OT_importer(bpy.types.Operator):
                 elif UniformType == BOOLEAN:
                     struct.unpack("I",file.read(4))
 
-        (MaterialMapCount) = struct.unpack('I',file.read(4))
+        ( MaterialMapCount, ) = struct.unpack('I',file.read(4))
+        print("Material Map Count:", MaterialMapCount)
         # Material Map
         struct.unpack(str(MaterialMapCount) + 'I',file.read(MaterialMapCount*4))
 
-        (AlternateMaterialMapCount) = struct.unpack('I',file.read(4))
+        ( AlternateMaterialMapCount, ) = struct.unpack('I',file.read(4))
+        print("Alternate Material Map Count:", AlternateMaterialMapCount)
         for i in range(AlternateMaterialMapCount):
             file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
             struct.unpack(str(MaterialMapCount) + 'I',file.read(MaterialMapCount*4))
 
         # Unknown Int Array
-        struct.unpack(str(MaterialMapCount) + 'I',file.read(MaterialMapCount*4))
+        ( count, ) = struct.unpack('I',file.read(4))
+        struct.unpack(str(count) + 'I',file.read(count*4))
 
+        # Read Meshes
+        ( MeshCount, ) = struct.unpack('I',file.read(4))
+        Meshes = []
+        for i in range(MeshCount):
+            ( LOD, VertexCount, TriangleCount, VertexOffset1, VertexOffset2, IndexOffset ) = struct.unpack('6I',file.read(6*4))
+            mesh_data = bpy.data.meshes.new(str(i)+"-"+str(LOD))
+            mesh_object = bpy.data.objects.new(str(i)+"-"+str(LOD), mesh_data)
+
+            bpy.context.collection.objects.link(mesh_object)
+
+            bpy.ops.object.select_all(action='DESELECT')
+            bpy.context.view_layer.objects.active = mesh_object
+            bpy.ops.object.mode_set(mode='EDIT')
+
+            # Unknown
+            struct.unpack('i',file.read(4))
+            # Bounding Sphere
+            struct.unpack('4i',file.read(4*4))
+            # Bounding Box
+            struct.unpack('6i',file.read(6*4))
+            
+            # Unknown
+            struct.unpack('i',file.read(4))
+
+            ( VertexAttribCount, ) = struct.unpack('B',file.read(1))
+            VertexAttribs = []
+            FormatStrings = ["", ""]
+            print("Vertex Attrib Count:", VertexAttribCount)
+            for j in range(VertexAttribCount):
+                (BufferIndex, Type, Semantic, Zero) = struct.unpack('4B',file.read(4))
+                print("Buffer Index", BufferIndex, "Type", Type, "Semantic", Semantic, "Zero", Zero)
+                VertexAttribs.append({"BuferIndex": BufferIndex, "Type": Type, "Semantic": Semantic})
+                FormatStrings[BufferIndex] += Format[Type]
+            print("FormatStrings", FormatStrings)
+
+            
+            # Unknown
+            struct.unpack('i',file.read(4))
+            # Unknown
+            struct.unpack('f',file.read(4))
+            # Unknown
+            struct.unpack('B',file.read(1))
+            # Unknown
+            struct.unpack('f',file.read(4))
+
+            bpy.ops.object.mode_set(mode='OBJECT')
+        
+        #TODO: Create Blender Meshes
         file.close()
         bpy.context.view_layer.update()
         return {'FINISHED'}
