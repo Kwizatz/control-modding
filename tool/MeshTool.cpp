@@ -95,7 +95,7 @@ namespace ControlModding
             os << "Unknown ("<< static_cast<uint32_t>(aAttributeInfo.Usage) <<")";
             break;
         }
-        os << "\nZero " << static_cast<uint32_t>(aAttributeInfo.Zero) << "\n";
+        os << "\nZero " << static_cast<uint32_t>(aAttributeInfo.Zero);
         return os;
     }
 
@@ -310,7 +310,6 @@ namespace ControlModding
             uint8_t vertex_format_count{};
             aIndex = PrintSingle<uint8_t>(aIndex,"Vertex Format Count (byte)", &vertex_format_count);
             aIndex = PrintArrayCount<AttributeInfo>(aIndex,"Vertex Format", vertex_format_count);
-
             aIndex = PrintSingle<int32_t>(aIndex,"Unknown Int");
             aIndex = PrintSingle<float>(aIndex,"Unknown Float");
             aIndex = PrintSingle<uint8_t>(aIndex,"Unknown Byte as Bool");
@@ -502,16 +501,22 @@ namespace ControlModding
 
         uint32_t submesh_count1;
         index = PrintSingle<uint32_t>(index,"SubMesh Count 1",&submesh_count1);
+        std::cout<< "---------------------------------------------------------------------------" << std::endl;
         for(uint32_t i = 0; i<submesh_count1;++i)
         {
             index = PrintMesh(index,std::string("SM 1 Mesh ")+std::to_string(i)+std::string(" LOD"));
+            std::cout<< "---------------------------------------------------------------------------" << std::endl;
         }
+
+        std::cout << std::endl;
 
         uint32_t submesh_count2;
         index = PrintSingle<uint32_t>(index,"SubMesh Count 2",&submesh_count2);
+        std::cout<< "---------------------------------------------------------------------------" << std::endl;
         for(uint32_t i = 0; i< submesh_count2;++i)
         {
-            index = PrintMesh(index,std::string("SM 1 Mesh ")+std::to_string(i)+std::string(" LOD"));
+            index = PrintMesh(index,std::string("SM 2 Mesh ")+std::to_string(i)+std::string(" LOD"));
+            std::cout<< "---------------------------------------------------------------------------" << std::endl;
         }
 
         index = PrintArray<uint32_t>(index, "Unknown Array, usually zero");
