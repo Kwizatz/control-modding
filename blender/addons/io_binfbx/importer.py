@@ -53,6 +53,15 @@ Format = {
     R16G16B16A16_UINT : '4h'
 }
 
+FormatIndexCount = {
+    R32G32B32_FLOAT   : 3,
+    B8G8R8A8_UNORM    : 4,
+    R8G8B8A8_UINT     : 4,
+    R16G16_SINT       : 2,
+    R16G16B16A16_SINT : 4,
+    R16G16B16A16_UINT : 4
+}
+
 class BINFBX_OT_importer(bpy.types.Operator):
 
     '''Imports a binfbx file'''
@@ -76,12 +85,20 @@ class BINFBX_OT_importer(bpy.types.Operator):
             self.report({'ERROR'}, "Invalid BinFBX file")
             return {'CANCELLED'}
 
-        (AttributeBufferSize, VertexBufferSize, IndexCount, IndexSize) = struct.unpack("IIII",file.read(16))
+        VertexBufferSizes = [0, 0]
+        (VertexBufferSizes[0], VertexBufferSizes[1], IndexCount, IndexSize) = struct.unpack("IIII",file.read(16))
         # Read Buffers
         #file.read(AttributeBufferSize + VertexBufferSize + (IndexCount * IndexSize))
-        VertexBuffer1 = file.read(AttributeBufferSize)
-        VertexBuffer2 = file.read(VertexBufferSize)
+        VertexBuffers = [ file.read(VertexBufferSizes[0]), file.read(VertexBufferSizes[1]) ]
         IndexBuffer   = file.read(IndexCount * IndexSize)
+
+        IndexFormat = ""
+        if IndexSize == 1:
+            IndexFormat = "3B"
+        elif IndexSize == 2:
+            IndexFormat = "3H"
+        elif IndexSize == 4:
+            IndexFormat = "3I"
 
         ( JointCount, ) = struct.unpack('I',file.read(4))
         # Read Skeleton
@@ -203,19 +220,18 @@ class BINFBX_OT_importer(bpy.types.Operator):
         ( count, ) = struct.unpack('I',file.read(4))
         struct.unpack(str(count) + 'I',file.read(count*4))
 
-        # Read Meshes
+        # Read Meshes 1
         ( MeshCount, ) = struct.unpack('I',file.read(4))
-        Meshes = []
         for i in range(MeshCount):
-            ( LOD, VertexCount, TriangleCount, VertexOffset1, VertexOffset2, IndexOffset ) = struct.unpack('6I',file.read(6*4))
-            mesh_data = bpy.data.meshes.new(str(i)+"-"+str(LOD))
-            mesh_object = bpy.data.objects.new(str(i)+"-"+str(LOD), mesh_data)
+            VertexOffsets = [0,0]
+            ( LOD, VertexCount, FaceCount, VertexOffsets[0], VertexOffsets[1], IndexOffset ) = struct.unpack('6I',file.read(6*4))
+            mesh_data = bpy.data.meshes.new("0-"+str(i)+"-"+str(LOD))
+            mesh_object = bpy.data.objects.new("0-"+str(i)+"-"+str(LOD), mesh_data)
 
             bpy.context.collection.objects.link(mesh_object)
 
             bpy.ops.object.select_all(action='DESELECT')
             bpy.context.view_layer.objects.active = mesh_object
-            bpy.ops.object.mode_set(mode='EDIT')
 
             # Unknown
             struct.unpack('i',file.read(4))
@@ -228,17 +244,37 @@ class BINFBX_OT_importer(bpy.types.Operator):
             struct.unpack('i',file.read(4))
 
             ( VertexAttribCount, ) = struct.unpack('B',file.read(1))
-            VertexAttribs = []
+            VertexAttribs = [[],[]]
             FormatStrings = ["", ""]
+            AttribIndex = [0, 0]
             print("Vertex Attrib Count:", VertexAttribCount)
             for j in range(VertexAttribCount):
                 (BufferIndex, Type, Semantic, Zero) = struct.unpack('4B',file.read(4))
-                print("Buffer Index", BufferIndex, "Type", Type, "Semantic", Semantic, "Zero", Zero)
-                VertexAttribs.append({"BuferIndex": BufferIndex, "Type": Type, "Semantic": Semantic})
+                # Why are these switched?
+                if BufferIndex == 0:
+                    BufferIndex = 1
+                elif BufferIndex == 1:
+                    BufferIndex = 0
+                VertexAttribs[BufferIndex].append({"Type": Type, "Semantic": Semantic, "Index": AttribIndex[BufferIndex], "IndexCount": FormatIndexCount[Type]})
                 FormatStrings[BufferIndex] += Format[Type]
-            print("FormatStrings", FormatStrings)
+                AttribIndex[BufferIndex] += FormatIndexCount[Type]
+            print("FormatStrings", FormatStrings, struct.calcsize(FormatStrings[0]), struct.calcsize(FormatStrings[1]))
 
-            
+            Vertices = []
+            Faces = []
+            for j in range(2):
+                for vertex in struct.iter_unpack(FormatStrings[j], VertexBuffers[j][VertexOffsets[j]:VertexOffsets[j]  + (VertexCount*struct.calcsize(FormatStrings[j]))]):
+                    for attrib in VertexAttribs[j]:
+                        if attrib["Semantic"] == POSITION:
+                            assert attrib["Type"] == R32G32B32_FLOAT
+                            v = []
+                            for k in range(attrib["IndexCount"]):
+                                v.append(vertex[attrib["Index"] + k])
+                            Vertices.append(v)
+            for j in struct.iter_unpack(IndexFormat, IndexBuffer[IndexOffset*IndexSize:(IndexOffset*IndexSize)+(FaceCount*3*IndexSize)]):
+                Faces.append(j)
+            mesh_data.from_pydata(Vertices, [], Faces)
+
             # Unknown
             struct.unpack('i',file.read(4))
             # Unknown
@@ -248,9 +284,75 @@ class BINFBX_OT_importer(bpy.types.Operator):
             # Unknown
             struct.unpack('f',file.read(4))
 
-            bpy.ops.object.mode_set(mode='OBJECT')
-        
-        #TODO: Create Blender Meshes
+
+
+
+
+
+        # Read Meshes 2
+        ( MeshCount, ) = struct.unpack('I',file.read(4))
+        for i in range(MeshCount):
+            VertexOffsets = [0,0]
+            ( LOD, VertexCount, FaceCount, VertexOffsets[0], VertexOffsets[1], IndexOffset ) = struct.unpack('6I',file.read(6*4))
+            mesh_data = bpy.data.meshes.new("1-"+str(i)+"-"+str(LOD))
+            mesh_object = bpy.data.objects.new("1-"+str(i)+"-"+str(LOD), mesh_data)
+
+            bpy.context.collection.objects.link(mesh_object)
+
+            bpy.ops.object.select_all(action='DESELECT')
+            bpy.context.view_layer.objects.active = mesh_object
+
+            # Unknown
+            struct.unpack('i',file.read(4))
+            # Bounding Sphere
+            struct.unpack('4i',file.read(4*4))
+            # Bounding Box
+            struct.unpack('6i',file.read(6*4))
+            
+            # Unknown
+            struct.unpack('i',file.read(4))
+
+            ( VertexAttribCount, ) = struct.unpack('B',file.read(1))
+            VertexAttribs = [[],[]]
+            FormatStrings = ["", ""]
+            AttribIndex = [0, 0]
+            print("Vertex Attrib Count:", VertexAttribCount)
+            for j in range(VertexAttribCount):
+                (BufferIndex, Type, Semantic, Zero) = struct.unpack('4B',file.read(4))
+                # Why are these switched?
+                if BufferIndex == 0:
+                    BufferIndex = 1
+                elif BufferIndex == 1:
+                    BufferIndex = 0
+                VertexAttribs[BufferIndex].append({"Type": Type, "Semantic": Semantic, "Index": AttribIndex[BufferIndex], "IndexCount": FormatIndexCount[Type]})
+                FormatStrings[BufferIndex] += Format[Type]
+                AttribIndex[BufferIndex] += FormatIndexCount[Type]
+            print("FormatStrings", FormatStrings, struct.calcsize(FormatStrings[0]), struct.calcsize(FormatStrings[1]))
+
+            Vertices = []
+            Faces = []
+            for j in range(2):
+                for vertex in struct.iter_unpack(FormatStrings[j], VertexBuffers[j][VertexOffsets[j]:VertexOffsets[j]  + (VertexCount*struct.calcsize(FormatStrings[j]))]):
+                    for attrib in VertexAttribs[j]:
+                        if attrib["Semantic"] == POSITION:
+                            assert attrib["Type"] == R32G32B32_FLOAT
+                            v = []
+                            for k in range(attrib["IndexCount"]):
+                                v.append(vertex[attrib["Index"] + k])
+                            Vertices.append(v)
+            for j in struct.iter_unpack(IndexFormat, IndexBuffer[IndexOffset*IndexSize:(IndexOffset*IndexSize)+(FaceCount*3*IndexSize)]):
+                Faces.append(j)
+            mesh_data.from_pydata(Vertices, [], Faces)
+
+            # Unknown
+            struct.unpack('i',file.read(4))
+            # Unknown
+            struct.unpack('f',file.read(4))
+            # Unknown
+            struct.unpack('B',file.read(1))
+            # Unknown
+            struct.unpack('f',file.read(4))
+
         file.close()
         bpy.context.view_layer.update()
         return {'FINISHED'}
