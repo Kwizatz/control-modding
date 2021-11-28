@@ -62,6 +62,7 @@ FormatIndexCount = {
     R16G16B16A16_UINT : 4
 }
 
+right_hand_matrix = mathutils.Matrix(((-1, 0, 0, 0), (0, -1, 0, 0), (0, 0, -1, 0), (0, 0, 0, 1)))
 class BINFBX_OT_importer(bpy.types.Operator):
 
     '''Imports a binfbx file'''
@@ -102,7 +103,6 @@ class BINFBX_OT_importer(bpy.types.Operator):
 
         ( JointCount, ) = struct.unpack('I',file.read(4))
         # Read Skeleton
-        print("Joint Count:", JointCount)
 
         if JointCount > 0:
             armature_data = bpy.data.armatures.new("armature")
@@ -113,7 +113,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
             bpy.ops.object.select_all(action='DESELECT')
             bpy.context.view_layer.objects.active = armature_object
 
-            print("Creating Joints")
+            # Creating Joints
             bpy.ops.object.mode_set(mode='EDIT')
 
             joints = []
@@ -127,7 +127,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
                 parent = struct.unpack('i',file.read(4))
                 rotation = mathutils.Matrix(((matrix[0], matrix[1], matrix[2], 0.0), (matrix[3], matrix[4], matrix[5], 0.0), (matrix[6], matrix[7], matrix[8], 0.0), (0.0,0.0,0.0, 1.0)))
                 translation = mathutils.Matrix.Translation((matrix[9], matrix[10], matrix[11]))
-                transform = rotation @ translation
+                transform = (right_hand_matrix @ (rotation @ translation) @ right_hand_matrix)
                 joints.append([JointName, transform , parent[0], tail, radius])
             # Pass 2 - Create Bones
             for joint in joints:
@@ -138,10 +138,10 @@ class BINFBX_OT_importer(bpy.types.Operator):
                     armature_data.edit_bones[joint_index].parent = armature_data.edit_bones[joints[joint_index][2]]
                 armature_data.edit_bones[joint_index].matrix = joints[joint_index][1]
                 # Avoid zero length bones as well as unused radius and tail going to the origin 
-                if (joints[joint_index][4] == 0.0 and joints[joint_index][3] == mathutils.Vector((0.0,0.0,0.0))) or (armature_data.edit_bones[joint_index].head == -joints[joint_index][3]):
+                if (joints[joint_index][4] == 0.0 and joints[joint_index][3] == mathutils.Vector((0.0,0.0,0.0))) or (armature_data.edit_bones[joint_index].head == joints[joint_index][3]):
                     armature_data.edit_bones[joint_index].length = 0.01
                 else:
-                    armature_data.edit_bones[joint_index].tail = -joints[joint_index][3]
+                    armature_data.edit_bones[joint_index].tail = joints[joint_index][3]
                     armature_data.edit_bones[joint_index].tail_radius = joints[joint_index][4]
                     armature_data.edit_bones[joint_index].head_radius = joints[joint_index][4]
             bpy.ops.object.mode_set(mode='OBJECT')
@@ -164,7 +164,6 @@ class BINFBX_OT_importer(bpy.types.Operator):
 
         # Read Materials
         ( MaterialCount, ) = struct.unpack('I',file.read(4))
-        print("Material Count:", MaterialCount)
         for i in range(MaterialCount):
             print("Material", i)
             # Material Magick
@@ -247,7 +246,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
             VertexAttribs = [[],[]]
             FormatStrings = ["", ""]
             AttribIndex = [0, 0]
-            print("Vertex Attrib Count:", VertexAttribCount)
+            SemanticCount = {}
             for j in range(VertexAttribCount):
                 (BufferIndex, Type, Semantic, Zero) = struct.unpack('4B',file.read(4))
                 # Why are these switched?
@@ -255,10 +254,16 @@ class BINFBX_OT_importer(bpy.types.Operator):
                     BufferIndex = 1
                 elif BufferIndex == 1:
                     BufferIndex = 0
-                VertexAttribs[BufferIndex].append({"Type": Type, "Semantic": Semantic, "Index": AttribIndex[BufferIndex], "IndexCount": FormatIndexCount[Type]})
+                if Semantic not in SemanticCount:
+                    SemanticCount[Semantic] = 0
+                VertexAttribs[BufferIndex].append({"Type": Type, "Semantic": Semantic, "SemanticIndex": SemanticCount[Semantic], "Index": AttribIndex[BufferIndex], "IndexCount": FormatIndexCount[Type]})
+                SemanticCount[Semantic] += 1
                 FormatStrings[BufferIndex] += Format[Type]
                 AttribIndex[BufferIndex] += FormatIndexCount[Type]
-            print("FormatStrings", FormatStrings, struct.calcsize(FormatStrings[0]), struct.calcsize(FormatStrings[1]))
+
+            UVs = []
+            for j in range(SemanticCount[TEXCOORD]):
+                UVs.append([])
 
             Vertices = []
             Faces = []
@@ -266,14 +271,22 @@ class BINFBX_OT_importer(bpy.types.Operator):
                 for vertex in struct.iter_unpack(FormatStrings[j], VertexBuffers[j][VertexOffsets[j]:VertexOffsets[j]  + (VertexCount*struct.calcsize(FormatStrings[j]))]):
                     for attrib in VertexAttribs[j]:
                         if attrib["Semantic"] == POSITION:
-                            assert attrib["Type"] == R32G32B32_FLOAT
+                            assert attrib["Type"] == R32G32B32_FLOAT # Position is always 3 floats
+                            assert attrib["SemanticIndex"] == 0 # There should only be one position semantic
                             v = []
                             for k in range(attrib["IndexCount"]):
                                 v.append(vertex[attrib["Index"] + k])
                             Vertices.append(v)
+                        if attrib["Semantic"] == TEXCOORD:
+                            UVs[attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/4095.0, 1.0-(vertex[attrib["Index"] + 1]/4095.0)))
             for j in struct.iter_unpack(IndexFormat, IndexBuffer[IndexOffset*IndexSize:(IndexOffset*IndexSize)+(FaceCount*3*IndexSize)]):
                 Faces.append(j)
             mesh_data.from_pydata(Vertices, [], Faces)
+
+            for j in range(SemanticCount[TEXCOORD]):
+                mesh_data.uv_layers.new(name="UV"+str(j))
+                for k in range(len(mesh_data.uv_layers[j].data)):
+                    mesh_data.uv_layers[j].data[k].uv = UVs[j][mesh_data.loops[k].vertex_index]
 
             # Unknown
             struct.unpack('i',file.read(4))
@@ -283,10 +296,6 @@ class BINFBX_OT_importer(bpy.types.Operator):
             struct.unpack('B',file.read(1))
             # Unknown
             struct.unpack('f',file.read(4))
-
-
-
-
 
 
         # Read Meshes 2
@@ -316,7 +325,6 @@ class BINFBX_OT_importer(bpy.types.Operator):
             VertexAttribs = [[],[]]
             FormatStrings = ["", ""]
             AttribIndex = [0, 0]
-            print("Vertex Attrib Count:", VertexAttribCount)
             for j in range(VertexAttribCount):
                 (BufferIndex, Type, Semantic, Zero) = struct.unpack('4B',file.read(4))
                 # Why are these switched?
@@ -327,7 +335,6 @@ class BINFBX_OT_importer(bpy.types.Operator):
                 VertexAttribs[BufferIndex].append({"Type": Type, "Semantic": Semantic, "Index": AttribIndex[BufferIndex], "IndexCount": FormatIndexCount[Type]})
                 FormatStrings[BufferIndex] += Format[Type]
                 AttribIndex[BufferIndex] += FormatIndexCount[Type]
-            print("FormatStrings", FormatStrings, struct.calcsize(FormatStrings[0]), struct.calcsize(FormatStrings[1]))
 
             Vertices = []
             Faces = []
