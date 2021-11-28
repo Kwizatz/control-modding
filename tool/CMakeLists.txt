@@ -15,8 +15,8 @@
 
 find_package(SQLite3)
 
-set(CONTROL_TOOL_HEADERS Tool.h MeshTool.h)
-set(CONTROL_TOOL_SOURCES Main.cpp MeshTool.cpp)
+set(CONTROL_TOOL_HEADERS Tool.h MeshTool.h BinFBX.h)
+set(CONTROL_TOOL_SOURCES Main.cpp MeshTool.cpp BinFBX.cpp)
 
 add_executable(control-tool ${CONTROL_TOOL_HEADERS} ${CONTROL_TOOL_SOURCES})
 if(SQLite3_FOUND)

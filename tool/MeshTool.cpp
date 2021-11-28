@@ -44,7 +44,7 @@ namespace ControlModding
     };
 
     std::ostream& operator<<(std::ostream& os, const AttributeInfo& aAttributeInfo){
-        os << "\nBufferLocation " << static_cast<uint32_t>(aAttributeInfo.BufferLocation) << "\nType ";
+        os << "\nBufferLocation " << static_cast<uint32_t>(aAttributeInfo.Index) << "\nType ";
 
         switch(aAttributeInfo.Type)
         {
@@ -326,11 +326,14 @@ namespace ControlModding
         file.open ( mInputFile, std::ifstream::in | std::ifstream::binary );
         std::vector<uint8_t> buffer ( ( std::istreambuf_iterator<char> ( file ) ), ( std::istreambuf_iterator<char>() ) );
         file.close();
+
+        BinFBX binfbx{buffer};
+
         uint8_t* index = buffer.data();
-        Header* binfbx = reinterpret_cast<Header*>(buffer.data());
-        if(binfbx->Magick!=BinFBXMagick)
+        Header* header = reinterpret_cast<Header*>(buffer.data());
+        if(header->Magick!=BinFBXMagick)
         {
-            std::cout << "Not a BinFBX file " << binfbx->Magick << std::endl;
+            std::cout << "Not a BinFBX file " << header->Magick << std::endl;
             return -1;
         }        
 #if 0
@@ -360,7 +363,7 @@ namespace ControlModding
         index = PrintSingle<uint32_t>(index,"Index Size");
         
         // Move Past the Buffers
-        index += binfbx->AttributeBufferSize + binfbx->VertexBufferSize + (binfbx->IndexCount * binfbx->IndexSize);
+        index += header->VertexBufferSizes[0] + header->VertexBufferSizes[1] + (header->IndexCount * header->IndexSize);
 
         uint32_t JointCount = *reinterpret_cast<uint32_t*>(index);
         std::cout << "Joint Count " << JointCount << std::endl;
