@@ -20,6 +20,7 @@ limitations under the License.
 #include <vector>
 #include <array>
 #include <cstdint>
+#include <string>
 
 namespace ControlModding
 {
@@ -46,6 +47,41 @@ namespace ControlModding
         uint8_t Zero;  // Always 0?
         operator uint32_t() const { return *reinterpret_cast<const uint32_t*>(this); }
     };
+
+    class Joint
+    {
+    public:
+        Joint(std::vector<uint8_t>::const_iterator& it);
+    private:
+        std::string mName;
+        std::array<float, 12> mMatrix{};
+        std::array<float, 3> mEnvelope{};
+        float mRadius{};
+        int32_t mParent{};
+    };
+
+    class UniformVariable
+    {
+    public:
+        UniformVariable(std::vector<uint8_t>::const_iterator& it);
+    private:
+        std::string mName{};
+        uint32_t mUniformType;
+    };
+
+    class Material
+    {
+    public:
+        Material(std::vector<uint8_t>::const_iterator& it);
+    private:
+        std::array<uint8_t, 8> mMaterialId{};
+        std::string mName;
+        std::string mType;
+        std::string mPath;
+        std::array<int32_t, 6> mUnknown0{};
+        std::vector<UniformVariable> mUniformVariables{};
+    };
+
     class BinFBX
     {
     public:
@@ -54,6 +90,19 @@ namespace ControlModding
         uint32_t mIndexSize;
         std::array<std::vector<uint8_t>, 2> mVertexBuffers{};
         std::vector<uint8_t> mIndexBuffer{};
+        std::vector<Joint> mJoints{};
+
+        // Start Block Of Unknowns
+        std::array<int32_t, 2> mUnknown0{};
+        float mUnknown1{};
+        std::vector<float> mUnknown2;
+        float mUnknown3{};
+        std::array<float, 3> mUnknown4{};
+        float mUnknown5{};
+        std::array<float, 3> mUnknown6{};
+        std::array<float, 3> mUnknown7{};
+        float mUnknown8{};
+        // End Block Of Unknowns
     };
 }
 #endif
