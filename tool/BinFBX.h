@@ -21,6 +21,7 @@ limitations under the License.
 #include <array>
 #include <cstdint>
 #include <string>
+#include <variant>
 
 namespace ControlModding
 {
@@ -65,8 +66,10 @@ namespace ControlModding
     public:
         UniformVariable(std::vector<uint8_t>::const_iterator& it);
     private:
+        using UniformData = std::variant<std::monostate, float, uint32_t, std::array<float, 2>, std::array<float, 3>, std::array<float, 4>, std::string>;
         std::string mName{};
-        uint32_t mUniformType;
+        uint32_t mUniformType{};
+        UniformData mData{};
     };
 
     class Material
@@ -92,7 +95,7 @@ namespace ControlModding
         std::vector<uint8_t> mIndexBuffer{};
         std::vector<Joint> mJoints{};
 
-        // Start Block Of Unknowns
+        // Block Of Unknowns
         std::array<int32_t, 2> mUnknown0{};
         float mUnknown1{};
         std::vector<float> mUnknown2;
@@ -101,8 +104,9 @@ namespace ControlModding
         float mUnknown5{};
         std::array<float, 3> mUnknown6{};
         std::array<float, 3> mUnknown7{};
-        float mUnknown8{};
-        // End Block Of Unknowns
+        uint32_t mUnknown8{};
+        // Materials
+        std::vector<Material> mMaterials{};
     };
 }
 #endif
