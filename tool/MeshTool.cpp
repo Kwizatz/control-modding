@@ -328,6 +328,10 @@ namespace ControlModding
         file.close();
 
         BinFBX binfbx{buffer};
+        if(!mOutputFile.empty())
+        {
+            binfbx.Write(mOutputFile);
+        }
 
         uint8_t* index = buffer.data();
         Header* header = reinterpret_cast<Header*>(buffer.data());

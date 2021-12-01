@@ -21,7 +21,9 @@ limitations under the License.
 #include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <variant>
+#include <tuple>
 
 namespace ControlModding
 {
@@ -47,12 +49,14 @@ namespace ControlModding
         uint8_t Usage; // 0x1 = Normal, 0x2 = TexCoord, 0x3 = Tangent, 0x5 = Index, 0x6 = Weight
         uint8_t Zero;  // Always 0?
         operator uint32_t() const { return *reinterpret_cast<const uint32_t*>(this); }
+        AttributeInfo(std::vector<uint8_t>::const_iterator& it) : Index{*it++}, Type{*it++}, Usage{*it++}, Zero{*it++} {}
     };
 
     class Joint
     {
     public:
         Joint(std::vector<uint8_t>::const_iterator& it);
+        void Write(std::ofstream& out) const;
     private:
         std::string mName;
         std::array<float, 12> mMatrix{};
@@ -85,14 +89,41 @@ namespace ControlModding
         std::vector<UniformVariable> mUniformVariables{};
     };
 
+    class Mesh
+    {
+    public:
+        Mesh(std::vector<uint8_t>::const_iterator& it);
+    private:
+            uint32_t mLOD{};
+            uint32_t mVertexCount{};
+            uint32_t mTriangleCount{};
+            std::array<uint32_t,2> mVertexBufferOffsets{};
+            uint32_t mIndexBufferOffset{};
+
+            int32_t mUnknown0{};
+
+            std::array<int32_t, 4> mBoundingSphere{};
+            std::array<int32_t, 6> mBoundingBox{};
+
+            int32_t mUnknown1{};
+            /// @note IMPORTANT: The AttributeInfo count must be written as a uint_8_t, not an int_32_t.
+            std::vector<AttributeInfo> mAttributeInfos{};
+
+            int32_t mUnknown2{};
+            float mUnknown3{};
+            uint8_t mUnknown4{};
+            float mUnknown5{};
+    };
+
     class BinFBX
     {
     public:
         BinFBX(const std::vector<uint8_t>& aBuffer);
+        void Write(std::string_view aFileName) const;
     private:
-        uint32_t mIndexSize;
         std::array<std::vector<uint8_t>, 2> mVertexBuffers{};
         std::vector<uint8_t> mIndexBuffer{};
+        uint32_t mIndexSize;
         std::vector<Joint> mJoints{};
 
         // Block Of Unknowns
@@ -107,6 +138,19 @@ namespace ControlModding
         uint32_t mUnknown8{};
         // Materials
         std::vector<Material> mMaterials{};
+        std::vector<uint32_t> mMaterialMap{};
+        std::vector<std::tuple<std::string,std::vector<uint32_t>>> mAlternaleMaterialMaps{};
+
+        // Block Of Unknowns
+        std::vector<uint32_t> mUnknown9{};
+
+        // Meshes
+        std::array<std::vector<Mesh>,2> mMeshes{};
+
+        // Block Of Unknowns
+        uint32_t mUnknown10{};
+        float mUnknown11{};
+        std::vector<float> mUnknown12{};
     };
 }
 #endif
