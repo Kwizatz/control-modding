@@ -219,146 +219,98 @@ class BINFBX_OT_importer(bpy.types.Operator):
         ( count, ) = struct.unpack('I',file.read(4))
         struct.unpack(str(count) + 'I',file.read(count*4))
 
-        # Read Meshes 1
-        ( MeshCount, ) = struct.unpack('I',file.read(4))
-        for i in range(MeshCount):
-            VertexOffsets = [0,0]
-            ( LOD, VertexCount, FaceCount, VertexOffsets[0], VertexOffsets[1], IndexOffset ) = struct.unpack('6I',file.read(6*4))
-            mesh_data = bpy.data.meshes.new("0-"+str(i)+"-"+str(LOD))
-            mesh_object = bpy.data.objects.new("0-"+str(i)+"-"+str(LOD), mesh_data)
+        # Read Meshes
+        MeshCollectionNames = ["MeshGroupA", "MeshGroupB"]
+        for MeshCollectionName in MeshCollectionNames:        
+            ( MeshCount, ) = struct.unpack('I',file.read(4))
+            MeshCollection = None
+            if MeshCount > 0:
+                MeshCollection = bpy.data.collections.new(MeshCollectionName)
+                bpy.context.scene.collection.children.link(MeshCollection)  # Add the collection to the scene
+            LOD = -1
+            LODMeshIndex = None
+            LODCollection = None
+            for i in range(MeshCount):
+                VertexOffsets = [0,0]
+                old_lod = LOD
+                ( LOD, VertexCount, FaceCount, VertexOffsets[0], VertexOffsets[1], IndexOffset ) = struct.unpack('6I',file.read(6*4))
+                if old_lod != LOD:
+                    LODCollection = bpy.data.collections.new(MeshCollectionName + "-LOD-" + str(LOD))
+                    MeshCollection.children.link(LODCollection)
+                    LODMeshIndex = 0
+                mesh_data = bpy.data.meshes.new(MeshCollectionName + "LOD-"+str(LOD)+"-Mesh-"+str(LODMeshIndex))
+                mesh_object = bpy.data.objects.new(MeshCollectionName + "LOD-"+str(LOD)+"-Mesh-"+str(LODMeshIndex), mesh_data)
+                LODMeshIndex += 1
 
-            bpy.context.collection.objects.link(mesh_object)
+                LODCollection.objects.link(mesh_object)
 
-            bpy.ops.object.select_all(action='DESELECT')
-            bpy.context.view_layer.objects.active = mesh_object
+                bpy.ops.object.select_all(action='DESELECT')
+                bpy.context.view_layer.objects.active = mesh_object
 
-            # Unknown
-            struct.unpack('i',file.read(4))
-            # Bounding Sphere
-            struct.unpack('4i',file.read(4*4))
-            # Bounding Box
-            struct.unpack('6i',file.read(6*4))
-            
-            # Unknown
-            struct.unpack('i',file.read(4))
+                # Unknown
+                struct.unpack('i',file.read(4))
+                # Bounding Sphere
+                struct.unpack('4i',file.read(4*4))
+                # Bounding Box
+                struct.unpack('6i',file.read(6*4))
+                
+                # Unknown
+                struct.unpack('i',file.read(4))
 
-            ( VertexAttribCount, ) = struct.unpack('B',file.read(1))
-            VertexAttribs = [[],[]]
-            FormatStrings = ["", ""]
-            AttribIndex = [0, 0]
-            SemanticCount = {}
-            for j in range(VertexAttribCount):
-                (BufferIndex, Type, Semantic, Zero) = struct.unpack('4B',file.read(4))
-                # Why are these switched?
-                if BufferIndex == 0:
-                    BufferIndex = 1
-                elif BufferIndex == 1:
-                    BufferIndex = 0
-                if Semantic not in SemanticCount:
-                    SemanticCount[Semantic] = 0
-                VertexAttribs[BufferIndex].append({"Type": Type, "Semantic": Semantic, "SemanticIndex": SemanticCount[Semantic], "Index": AttribIndex[BufferIndex], "IndexCount": FormatIndexCount[Type]})
-                SemanticCount[Semantic] += 1
-                FormatStrings[BufferIndex] += Format[Type]
-                AttribIndex[BufferIndex] += FormatIndexCount[Type]
+                ( VertexAttribCount, ) = struct.unpack('B',file.read(1))
+                VertexAttribs = [[],[]]
+                FormatStrings = ["", ""]
+                AttribIndex = [0, 0]
+                SemanticCount = {}
+                for j in range(VertexAttribCount):
+                    (BufferIndex, Type, Semantic, Zero) = struct.unpack('4B',file.read(4))
+                    # Why are these switched?
+                    if BufferIndex == 0:
+                        BufferIndex = 1
+                    elif BufferIndex == 1:
+                        BufferIndex = 0
+                    if Semantic not in SemanticCount:
+                        SemanticCount[Semantic] = 0
+                    VertexAttribs[BufferIndex].append({"Type": Type, "Semantic": Semantic, "SemanticIndex": SemanticCount[Semantic], "Index": AttribIndex[BufferIndex], "IndexCount": FormatIndexCount[Type]})
+                    SemanticCount[Semantic] += 1
+                    FormatStrings[BufferIndex] += Format[Type]
+                    AttribIndex[BufferIndex] += FormatIndexCount[Type]
 
-            UVs = []
-            for j in range(SemanticCount[TEXCOORD]):
-                UVs.append([])
+                UVs = []
+                for j in range(SemanticCount[TEXCOORD]):
+                    UVs.append([])
 
-            Vertices = []
-            Faces = []
-            for j in range(2):
-                for vertex in struct.iter_unpack(FormatStrings[j], VertexBuffers[j][VertexOffsets[j]:VertexOffsets[j]  + (VertexCount*struct.calcsize(FormatStrings[j]))]):
-                    for attrib in VertexAttribs[j]:
-                        if attrib["Semantic"] == POSITION:
-                            assert attrib["Type"] == R32G32B32_FLOAT # Position is always 3 floats
-                            assert attrib["SemanticIndex"] == 0 # There should only be one position semantic
-                            v = []
-                            for k in range(attrib["IndexCount"]):
-                                v.append(vertex[attrib["Index"] + k])
-                            Vertices.append(v)
-                        if attrib["Semantic"] == TEXCOORD:
-                            UVs[attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/4095.0, 1.0-(vertex[attrib["Index"] + 1]/4095.0)))
-            for j in struct.iter_unpack(IndexFormat, IndexBuffer[IndexOffset*IndexSize:(IndexOffset*IndexSize)+(FaceCount*3*IndexSize)]):
-                Faces.append(j)
-            mesh_data.from_pydata(Vertices, [], Faces)
+                Vertices = []
+                Faces = []
+                for j in range(2):
+                    for vertex in struct.iter_unpack(FormatStrings[j], VertexBuffers[j][VertexOffsets[j]:VertexOffsets[j]  + (VertexCount*struct.calcsize(FormatStrings[j]))]):
+                        for attrib in VertexAttribs[j]:
+                            if attrib["Semantic"] == POSITION:
+                                assert attrib["Type"] == R32G32B32_FLOAT # Position is always 3 floats
+                                assert attrib["SemanticIndex"] == 0 # There should only be one position semantic
+                                v = []
+                                for k in range(attrib["IndexCount"]):
+                                    v.append(vertex[attrib["Index"] + k])
+                                Vertices.append(v)
+                            if attrib["Semantic"] == TEXCOORD:
+                                UVs[attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/4095.0, 1.0-(vertex[attrib["Index"] + 1]/4095.0)))
+                for j in struct.iter_unpack(IndexFormat, IndexBuffer[IndexOffset*IndexSize:(IndexOffset*IndexSize)+(FaceCount*3*IndexSize)]):
+                    Faces.append(j)
+                mesh_data.from_pydata(Vertices, [], Faces)
 
-            for j in range(SemanticCount[TEXCOORD]):
-                mesh_data.uv_layers.new(name="UV"+str(j))
-                for k in range(len(mesh_data.uv_layers[j].data)):
-                    mesh_data.uv_layers[j].data[k].uv = UVs[j][mesh_data.loops[k].vertex_index]
+                for j in range(SemanticCount[TEXCOORD]):
+                    mesh_data.uv_layers.new(name="UV"+str(j))
+                    for k in range(len(mesh_data.uv_layers[j].data)):
+                        mesh_data.uv_layers[j].data[k].uv = UVs[j][mesh_data.loops[k].vertex_index]
 
-            # Unknown
-            struct.unpack('i',file.read(4))
-            # Unknown
-            struct.unpack('f',file.read(4))
-            # Unknown
-            struct.unpack('B',file.read(1))
-            # Unknown
-            struct.unpack('f',file.read(4))
-
-
-        # Read Meshes 2
-        ( MeshCount, ) = struct.unpack('I',file.read(4))
-        for i in range(MeshCount):
-            VertexOffsets = [0,0]
-            ( LOD, VertexCount, FaceCount, VertexOffsets[0], VertexOffsets[1], IndexOffset ) = struct.unpack('6I',file.read(6*4))
-            mesh_data = bpy.data.meshes.new("1-"+str(i)+"-"+str(LOD))
-            mesh_object = bpy.data.objects.new("1-"+str(i)+"-"+str(LOD), mesh_data)
-
-            bpy.context.collection.objects.link(mesh_object)
-
-            bpy.ops.object.select_all(action='DESELECT')
-            bpy.context.view_layer.objects.active = mesh_object
-
-            # Unknown
-            struct.unpack('i',file.read(4))
-            # Bounding Sphere
-            struct.unpack('4i',file.read(4*4))
-            # Bounding Box
-            struct.unpack('6i',file.read(6*4))
-            
-            # Unknown
-            struct.unpack('i',file.read(4))
-
-            ( VertexAttribCount, ) = struct.unpack('B',file.read(1))
-            VertexAttribs = [[],[]]
-            FormatStrings = ["", ""]
-            AttribIndex = [0, 0]
-            for j in range(VertexAttribCount):
-                (BufferIndex, Type, Semantic, Zero) = struct.unpack('4B',file.read(4))
-                # Why are these switched?
-                if BufferIndex == 0:
-                    BufferIndex = 1
-                elif BufferIndex == 1:
-                    BufferIndex = 0
-                VertexAttribs[BufferIndex].append({"Type": Type, "Semantic": Semantic, "Index": AttribIndex[BufferIndex], "IndexCount": FormatIndexCount[Type]})
-                FormatStrings[BufferIndex] += Format[Type]
-                AttribIndex[BufferIndex] += FormatIndexCount[Type]
-
-            Vertices = []
-            Faces = []
-            for j in range(2):
-                for vertex in struct.iter_unpack(FormatStrings[j], VertexBuffers[j][VertexOffsets[j]:VertexOffsets[j]  + (VertexCount*struct.calcsize(FormatStrings[j]))]):
-                    for attrib in VertexAttribs[j]:
-                        if attrib["Semantic"] == POSITION:
-                            assert attrib["Type"] == R32G32B32_FLOAT
-                            v = []
-                            for k in range(attrib["IndexCount"]):
-                                v.append(vertex[attrib["Index"] + k])
-                            Vertices.append(v)
-            for j in struct.iter_unpack(IndexFormat, IndexBuffer[IndexOffset*IndexSize:(IndexOffset*IndexSize)+(FaceCount*3*IndexSize)]):
-                Faces.append(j)
-            mesh_data.from_pydata(Vertices, [], Faces)
-
-            # Unknown
-            struct.unpack('i',file.read(4))
-            # Unknown
-            struct.unpack('f',file.read(4))
-            # Unknown
-            struct.unpack('B',file.read(1))
-            # Unknown
-            struct.unpack('f',file.read(4))
+                # Unknown
+                struct.unpack('i',file.read(4))
+                # Unknown
+                struct.unpack('f',file.read(4))
+                # Unknown
+                struct.unpack('B',file.read(1))
+                # Unknown
+                struct.unpack('f',file.read(4))
 
         file.close()
         bpy.context.view_layer.update()
