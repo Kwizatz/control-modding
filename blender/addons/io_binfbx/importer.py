@@ -14,6 +14,7 @@
 
 import bpy
 import os
+import os.path
 import struct
 import mathutils
 import operator
@@ -69,14 +70,16 @@ class BINFBX_OT_importer(bpy.types.Operator):
     bl_idname = "import.binfbx"
     bl_label = "Import BinFBX"
 
-    filepath: bpy.props.StringProperty(subtype='FILE_PATH')
+    filepath: bpy.props.StringProperty(name="BinFBX", subtype='FILE_PATH')
+    directory: bpy.props.StringProperty(name="Path", subtype='DIR_PATH')
+    runtimedata: bpy.props.StringProperty(name="Runtime Data Path", subtype='DIR_PATH')
 
     @classmethod
     def poll(cls, context):
         return True
 
     def execute(self, context):
-        # bpy.ops.object.mode_set()
+        print("execute")
         self.filepath = bpy.path.ensure_ext(self.filepath, ".binfbx")
         # Open File
         file = open(self.filepath, "rb")
@@ -163,6 +166,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
         struct.unpack("I",file.read(4))
 
         # Read Materials
+        Materials = []
         ( MaterialCount, ) = struct.unpack('I',file.read(4))
         for i in range(MaterialCount):
             print("Material", i)
@@ -172,11 +176,14 @@ class BINFBX_OT_importer(bpy.types.Operator):
             struct.unpack("8B",file.read(8))
             
             #Material Name
-            file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
+            MaterialName = file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
             #Material Type
             file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
             #Material Path
             file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
+            
+            material = bpy.data.materials.new(MaterialName)
+            #material.use_nodes = True
 
             struct.unpack("6I",file.read(24))
 
@@ -188,7 +195,6 @@ class BINFBX_OT_importer(bpy.types.Operator):
                 file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
                 # Uniform Type
                 ( UniformType, ) = struct.unpack("I",file.read(4))
-                print("Uniform", j, "Type", UniformType)
                 if UniformType == FLOAT:
                     struct.unpack("f",file.read(4))
                 elif UniformType == RANGE:
@@ -198,16 +204,26 @@ class BINFBX_OT_importer(bpy.types.Operator):
                 elif UniformType == VECTOR:
                     struct.unpack("3f",file.read(12))
                 elif UniformType == TEXTUREMAP:
-                    file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
+                    image_path = file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
+                    image_path = image_path.replace("\\", os.sep)
+                    image_path = image_path.replace("/", os.sep)
+                    image_path = image_path.replace("runtimedata", self.runtimedata)
+                    if os.path.exists(image_path.strip()):
+                        # TODO: Load Image as DDS and add to material
+                        print("Image Path", image_path, "exists")
+                    else:
+                        print(image_path, "does not exist, fill the Runtime Data Path field to change where the textures are looked for")
                 elif UniformType == TEXTURESAMPLER:
                     pass
                 elif UniformType == BOOLEAN:
                     struct.unpack("I",file.read(4))
+            Materials.append(material)
 
         ( MaterialMapCount, ) = struct.unpack('I',file.read(4))
         print("Material Map Count:", MaterialMapCount)
-        # Material Map
-        struct.unpack(str(MaterialMapCount) + 'I',file.read(MaterialMapCount*4))
+        # First Material Map
+        MaterialMaps = []
+        MaterialMaps.append(struct.unpack(str(MaterialMapCount) + 'I',file.read(MaterialMapCount*4)))
 
         ( AlternateMaterialMapCount, ) = struct.unpack('I',file.read(4))
         print("Alternate Material Map Count:", AlternateMaterialMapCount)
@@ -215,9 +231,9 @@ class BINFBX_OT_importer(bpy.types.Operator):
             file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
             struct.unpack(str(MaterialMapCount) + 'I',file.read(MaterialMapCount*4))
 
-        # Unknown Int Array
+        # Second Material Map
         ( count, ) = struct.unpack('I',file.read(4))
-        struct.unpack(str(count) + 'I',file.read(count*4))
+        MaterialMaps.append(struct.unpack(str(count) + 'I',file.read(count*4)))
 
         # Read Meshes
         MeshCollectionNames = ["MeshGroupA", "MeshGroupB"]
@@ -312,10 +328,14 @@ class BINFBX_OT_importer(bpy.types.Operator):
                 # Unknown
                 struct.unpack('f',file.read(4))
 
+                mesh_object.data.materials.append(Materials[MaterialMaps[MeshCollectionNames.index(MeshCollectionName)][i]])
+
         file.close()
         bpy.context.view_layer.update()
         return {'FINISHED'}
 
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
+        #context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
+
