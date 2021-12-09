@@ -68,15 +68,29 @@ namespace ControlModding
             it += sizeof(float);
             break;
         case Range:
-            mData = std::array<float,2>{*reinterpret_cast<const float*>(&(*it)), *reinterpret_cast<const float*>(&(*it)+sizeof(float))};
+            mData = std::array<float,2>
+            {
+                *reinterpret_cast<const float*>(&(*it)),
+                *reinterpret_cast<const float*>(&(*it) + sizeof(float))
+            };
             it += sizeof(float) * 2;
             break;
         case Color:
-            mData = std::array<float,4>{*reinterpret_cast<const float*>(&(*it)), *reinterpret_cast<const float*>(&(*it)+sizeof(float))};
+            mData = std::array<float,4>{
+                *reinterpret_cast<const float*>(&(*it)),
+                * reinterpret_cast<const float*>(&(*it) + sizeof(float)),
+                * reinterpret_cast<const float*>(&(*it) + sizeof(float)*2),
+                * reinterpret_cast<const float*>(&(*it) + sizeof(float)*3)
+            };
             it += sizeof(float) * 4;
             break;
         case Vector:
-            mData = std::array<float,3>{*reinterpret_cast<const float*>(&(*it)), *reinterpret_cast<const float*>(&(*it)+sizeof(float))};
+            mData = std::array<float,3>
+            {
+                *reinterpret_cast<const float*>(&(*it)),
+                *reinterpret_cast<const float*>(&(*it) + sizeof(float)),
+                *reinterpret_cast<const float*>(&(*it) + sizeof(float)*2)
+            };
             it += sizeof(float) * 3;
             break;
         case TextureMap:
@@ -92,6 +106,41 @@ namespace ControlModding
         case Boolean:
             mData = *reinterpret_cast<const uint32_t*>(&(*it));
             it += sizeof(uint32_t);
+            break;
+        }
+    }
+    void UniformVariable::Write(std::ofstream& out) const
+    {
+        uint32_t size = static_cast<uint32_t>(mName.size());
+        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+        out.write(mName.data(), size);
+
+        out.write(reinterpret_cast<const char*>(&mUniformType), sizeof(uint32_t));
+        switch(mUniformType)
+        {
+        case Float:
+            out.write(reinterpret_cast<const char*>(&std::get<float>(mData)), sizeof(float));
+            break;
+        case Range:
+            out.write(reinterpret_cast<const char*>(std::get<std::array<float,2>>(mData).data()), sizeof(float)*2);
+            break;
+        case Color:
+            out.write(reinterpret_cast<const char*>(std::get<std::array<float,4>>(mData).data()), sizeof(float)*4);
+            break;
+        case Vector:
+            out.write(reinterpret_cast<const char*>(std::get<std::array<float,3>>(mData).data()), sizeof(float)*3);
+            break;
+        case TextureMap:
+            {
+                uint32_t size = static_cast<uint32_t>(std::get<std::string>(mData).size());
+                out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+                out.write(std::get<std::string>(mData).data(), size);
+            }
+            break;
+        case TextureSampler:
+            break;
+        case Boolean:
+            out.write(reinterpret_cast<const char*>(&std::get<uint32_t>(mData)), sizeof(uint32_t));
             break;
         }
     }
@@ -137,6 +186,28 @@ namespace ControlModding
         for (int32_t i = 0; i < count; ++i)
         {
             mUniformVariables.emplace_back(it);
+        }
+    }
+    void Material::Write(std::ofstream& out) const
+    {
+        uint32_t size{7};
+        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+        out.write(reinterpret_cast<const char*>(&mMaterialId), mMaterialId.size());
+        size = static_cast<uint32_t>(mName.size());
+        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+        out.write(mName.data(), size);
+        size = static_cast<uint32_t>(mType.size());
+        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+        out.write(mType.data(), size);
+        size = static_cast<uint32_t>(mPath.size());
+        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+        out.write(mPath.data(), size);
+        out.write(reinterpret_cast<const char*>(mUnknown0.data()), sizeof(int32_t) * mUnknown0.size());
+        size = static_cast<uint32_t>(mUniformVariables.size());
+        out.write(reinterpret_cast<const char*>(&size), sizeof(int32_t));
+        for (const auto& i : mUniformVariables)
+        {
+            i.Write(out);
         }
     }
 
@@ -185,6 +256,26 @@ namespace ControlModding
 
         mUnknown5 = *reinterpret_cast<const float*>(&(*it));
         it += sizeof(float);
+    }
+
+    void Mesh::Write(std::ofstream& out) const
+    {
+        out.write(reinterpret_cast<const char*>(&mLOD), sizeof(uint32_t));
+        out.write(reinterpret_cast<const char*>(&mVertexCount), sizeof(uint32_t)); 
+        out.write(reinterpret_cast<const char*>(&mTriangleCount), sizeof(uint32_t));
+        out.write(reinterpret_cast<const char*>(mVertexBufferOffsets.data()), sizeof(uint32_t) * mVertexBufferOffsets.size());
+        out.write(reinterpret_cast<const char*>(&mIndexBufferOffset), sizeof(uint32_t));
+        out.write(reinterpret_cast<const char*>(&mUnknown0), sizeof(int32_t));
+        out.write(reinterpret_cast<const char*>(mBoundingSphere.data()), sizeof(int32_t) * mBoundingSphere.size());
+        out.write(reinterpret_cast<const char*>(mBoundingBox.data()), sizeof(int32_t) * mBoundingBox.size());
+        out.write(reinterpret_cast<const char*>(&mUnknown1), sizeof(int32_t));
+        uint8_t count = static_cast<uint8_t>(mAttributeInfos.size());
+        out.write(reinterpret_cast<const char*>(&count), 1);
+        out.write(reinterpret_cast<const char*>(mAttributeInfos.data()), sizeof(decltype(mAttributeInfos)::value_type) * mAttributeInfos.size());
+        out.write(reinterpret_cast<const char*>(&mUnknown2), sizeof(int32_t));
+        out.write(reinterpret_cast<const char*>(&mUnknown3), sizeof(float));
+        out.write(reinterpret_cast<const char*>(&mUnknown4), 1);
+        out.write(reinterpret_cast<const char*>(&mUnknown5), sizeof(float));
     }
 
     BinFBX::BinFBX(const std::vector<uint8_t>& aBuffer)
@@ -296,10 +387,10 @@ namespace ControlModding
 
         count = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
-        mUnknown9.reserve(count);
+        mSecondMaterialMap.reserve(count);
         for (int32_t i = 0; i < count; ++i)
         {
-            mUnknown9.emplace_back(*reinterpret_cast<const uint32_t*>(&(*it)));
+            mSecondMaterialMap.emplace_back(*reinterpret_cast<const uint32_t*>(&(*it)));
             it += sizeof(float);
         }
 
@@ -316,18 +407,18 @@ namespace ControlModding
         }
 
         // Unknowns
-        mUnknown10 = *reinterpret_cast<const uint32_t*>(&(*it)); // This is always 0, so it could be really an array
+        mUnknown9 = *reinterpret_cast<const uint32_t*>(&(*it)); // This is always 0, so it could be really an array
         it += sizeof(uint32_t);
 
-        mUnknown11 = *reinterpret_cast<const float*>(&(*it));
+        mUnknown10 = *reinterpret_cast<const float*>(&(*it));
         it += sizeof(float);
 
         count = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
-        mUnknown12.reserve(count);
+        mUnknown11.reserve(count);
         for (int32_t i = 0; i < count; ++i)
         {
-            mUnknown12.emplace_back(*reinterpret_cast<const uint32_t*>(&(*it)));
+            mUnknown11.emplace_back(*reinterpret_cast<const float*>(&(*it)));
             it += sizeof(float);
         }
     }
@@ -362,6 +453,67 @@ namespace ControlModding
         {
             i.Write(out);
         }
+
+        // Block Of Unknowns
+        out.write(reinterpret_cast<const char*>(mUnknown0.data()), sizeof(decltype(mUnknown0)::value_type) * mUnknown0.size());
+        out.write(reinterpret_cast<const char*>(&mUnknown1), sizeof(float));
+
+        size = static_cast<uint32_t>(mUnknown2.size());
+        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+        out.write(reinterpret_cast<const char*>(mUnknown2.data()), sizeof(decltype(mUnknown2)::value_type) * mUnknown2.size());
+
+        out.write(reinterpret_cast<const char*>(&mUnknown3), sizeof(float));
+        out.write(reinterpret_cast<const char*>(mUnknown4.data()), sizeof(decltype(mUnknown4)::value_type) * mUnknown4.size());
+        out.write(reinterpret_cast<const char*>(&mUnknown5), sizeof(float));
+        out.write(reinterpret_cast<const char*>(mUnknown6.data()), sizeof(decltype(mUnknown6)::value_type) * mUnknown6.size());
+        out.write(reinterpret_cast<const char*>(mUnknown7.data()), sizeof(decltype(mUnknown7)::value_type) * mUnknown7.size());
+        out.write(reinterpret_cast<const char*>(&mUnknown8), sizeof(uint32_t));
+
+        // Materials
+        size = static_cast<uint32_t>(mMaterials.size());
+        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+        for(auto& i: mMaterials)
+        {
+            i.Write(out);
+        }
+
+        size = static_cast<uint32_t>(mMaterialMap.size());
+        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+        out.write(reinterpret_cast<const char*>(mMaterialMap.data()), sizeof(decltype(mMaterialMap)::value_type) * mMaterialMap.size());
+
+        size = static_cast<uint32_t>(mAlternaleMaterialMaps.size());
+        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+        for(auto& i: mAlternaleMaterialMaps)
+        {
+            size = static_cast<uint32_t>(std::get<std::string>(i).size());
+            out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+            out.write(std::get<std::string>(i).data(), std::get<std::string>(i).size());
+            size = static_cast<uint32_t>(std::get<std::vector<uint32_t>>(i).size());
+            out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+            out.write(reinterpret_cast<const char*>(std::get<std::vector<uint32_t>>(i).data()), sizeof(uint32_t) * std::get<std::vector<uint32_t>>(i).size());
+        }
+
+        size = static_cast<uint32_t>(mSecondMaterialMap.size());
+        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+        out.write(reinterpret_cast<const char*>(mSecondMaterialMap.data()), sizeof(decltype(mSecondMaterialMap)::value_type) * mSecondMaterialMap.size());
+
+        for(auto& i: mMeshes)
+        {
+            size = static_cast<uint32_t>(i.size());
+            out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+            for(auto& j: i)
+            {
+                j.Write(out);
+            }
+        }
+
+        out.write(reinterpret_cast<const char*>(&mUnknown9), sizeof(uint32_t));
+        out.write(reinterpret_cast<const char*>(&mUnknown10), sizeof(float));
+
+        size = static_cast<float>(mUnknown11.size());
+        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+        out.write(reinterpret_cast<const char*>(mUnknown11.data()), sizeof(float) * mUnknown11.size());
+
         out.close();
     }
 }

@@ -69,6 +69,7 @@ namespace ControlModding
     {
     public:
         UniformVariable(std::vector<uint8_t>::const_iterator& it);
+        void Write(std::ofstream& out) const;
     private:
         using UniformData = std::variant<std::monostate, float, uint32_t, std::array<float, 2>, std::array<float, 3>, std::array<float, 4>, std::string>;
         std::string mName{};
@@ -80,6 +81,7 @@ namespace ControlModding
     {
     public:
         Material(std::vector<uint8_t>::const_iterator& it);
+        void Write(std::ofstream& out) const;
     private:
         std::array<uint8_t, 8> mMaterialId{};
         std::string mName;
@@ -93,6 +95,7 @@ namespace ControlModding
     {
     public:
         Mesh(std::vector<uint8_t>::const_iterator& it);
+        void Write(std::ofstream& out) const;
     private:
             uint32_t mLOD{};
             uint32_t mVertexCount{};
@@ -140,17 +143,15 @@ namespace ControlModding
         std::vector<Material> mMaterials{};
         std::vector<uint32_t> mMaterialMap{};
         std::vector<std::tuple<std::string,std::vector<uint32_t>>> mAlternaleMaterialMaps{};
-
-        // Block Of Unknowns
-        std::vector<uint32_t> mUnknown9{};
+        std::vector<uint32_t> mSecondMaterialMap{};
 
         // Meshes
         std::array<std::vector<Mesh>,2> mMeshes{};
 
         // Block Of Unknowns
-        uint32_t mUnknown10{};
-        float mUnknown11{};
-        std::vector<float> mUnknown12{};
+        uint32_t mUnknown9{};
+        float mUnknown10{};
+        std::vector<float> mUnknown11{};
     };
 }
 #endif

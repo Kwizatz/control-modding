@@ -331,6 +331,7 @@ namespace ControlModding
         if(!mOutputFile.empty())
         {
             binfbx.Write(mOutputFile);
+            return 0;
         }
 
         uint8_t* index = buffer.data();
