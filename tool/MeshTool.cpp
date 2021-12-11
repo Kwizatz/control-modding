@@ -161,10 +161,12 @@ namespace ControlModding
         {
             throw std::runtime_error ( "No Input file provided." );
         }
+#if 0
         else if ( mOutputFile.empty() )
         {
             mOutputFile = mInputFile;
         }
+#endif
     }
 
     template<class T>
@@ -331,9 +333,13 @@ namespace ControlModding
         if(!mOutputFile.empty())
         {
             binfbx.Write(mOutputFile);
-            return 0;
         }
-
+        else
+        {
+            binfbx.Dump();
+        }
+        return 0;
+#if 0
         uint8_t* index = buffer.data();
         Header* header = reinterpret_cast<Header*>(buffer.data());
         if(header->Magick!=BinFBXMagick)
@@ -496,6 +502,7 @@ namespace ControlModding
 
         uint32_t material_map{};
         index = PrintArray<uint32_t>(index,"Material Map",&material_map);
+        
         uint32_t alternate_material_count{};
         index = PrintSingle<uint32_t>(index,"Alternate Material Count", &alternate_material_count);
 
@@ -531,5 +538,6 @@ namespace ControlModding
         index = PrintSingle<float>(index,"Unknown Float");
         index = PrintArray<float>(index, "Unknown Array of floats");
         return 0;
+#endif
     }
 }

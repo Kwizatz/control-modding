@@ -278,6 +278,21 @@ namespace ControlModding
         out.write(reinterpret_cast<const char*>(&mUnknown5), sizeof(float));
     }
 
+    void Mesh::Dump() const
+    {
+        std::cout << "Mesh" << std::endl;
+        std::cout << "LOD: " << mLOD << std::endl;
+        std::cout << "VertexCount: " << mVertexCount << std::endl;
+        std::cout << "TriangleCount: " << mTriangleCount << std::endl;
+        std::cout << "VertexBufferOffsets: ";
+        for (const auto& i : mVertexBufferOffsets)
+        {
+            std::cout << i << " ";
+        }
+        std::cout << std::endl;
+        std::cout << "IndexBufferOffset: " << mIndexBufferOffset << std::endl;
+    }
+
     BinFBX::BinFBX(const std::vector<uint8_t>& aBuffer)
     {
         const Header* header = reinterpret_cast<const Header*>(aBuffer.data());
@@ -364,6 +379,7 @@ namespace ControlModding
         count = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
         mAlternaleMaterialMaps.reserve(count);
+
         for (int32_t i = 0; i < count; ++i)
         {
             std::string name =
@@ -373,15 +389,13 @@ namespace ControlModding
             };
             it += sizeof(int32_t) + *reinterpret_cast<const int32_t*>(&(*it));
 
-            int32_t c = *reinterpret_cast<const int32_t*>(&(*it));
-            it += sizeof(int32_t);
             std::vector<uint32_t> v;
-            v.reserve(c);
-            for (int32_t j = 0; j < c; ++j)
+            v.reserve(mMaterialMap.size());
+            for (int32_t j = 0; j < mMaterialMap.size(); ++j)
             {
                 v.emplace_back(*reinterpret_cast<const uint32_t*>(&(*it)));
                 it += sizeof(uint32_t);
-            }
+             }
             mAlternaleMaterialMaps.emplace_back(std::move(name), std::move(v));
         }
 
@@ -393,6 +407,7 @@ namespace ControlModding
             mSecondMaterialMap.emplace_back(*reinterpret_cast<const uint32_t*>(&(*it)));
             it += sizeof(float);
         }
+
 
         // Meshes
         for(auto& m : mMeshes)
@@ -407,9 +422,8 @@ namespace ControlModding
         }
 
         // Unknowns
-        mUnknown9 = *reinterpret_cast<const uint32_t*>(&(*it)); // This is always 0, so it could be really an array
+        mUnknown9 = *reinterpret_cast<const uint32_t*>(&(*it)); 
         it += sizeof(uint32_t);
-
         mUnknown10 = *reinterpret_cast<const float*>(&(*it));
         it += sizeof(float);
 
@@ -481,8 +495,6 @@ namespace ControlModding
         out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
         out.write(reinterpret_cast<const char*>(mMaterialMap.data()), sizeof(decltype(mMaterialMap)::value_type) * mMaterialMap.size());
 
-        size = static_cast<uint32_t>(mAlternaleMaterialMaps.size());
-        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
         for(auto& i: mAlternaleMaterialMaps)
         {
             size = static_cast<uint32_t>(std::get<std::string>(i).size());
@@ -515,5 +527,16 @@ namespace ControlModding
         out.write(reinterpret_cast<const char*>(mUnknown11.data()), sizeof(float) * mUnknown11.size());
 
         out.close();
+    }
+
+    void BinFBX::Dump() const
+    {
+        for(auto &i: mMeshes)
+        {
+            for(auto &j: i)
+            {
+                j.Dump();
+            }
+        }
     }
 }
