@@ -19,6 +19,7 @@ limitations under the License.
 #include <cstring>
 #include <iostream>
 #include <fstream>
+#include <algorithm>
 namespace ControlModding
 {
     Joint::Joint(std::vector<uint8_t>::const_iterator& it) :
@@ -414,9 +415,16 @@ namespace ControlModding
             count = *reinterpret_cast<const int32_t*>(&(*it));
             it += sizeof(int32_t);
             m.reserve(count);
+            uint32_t lod{*reinterpret_cast<const uint32_t*>(&(*it))};
+            uint32_t index{0};
             for (int32_t i = 0; i < count; ++i)
             {
-                m.emplace_back(i, it);
+                if(lod != *reinterpret_cast<const uint32_t*>(&(*it)))
+                {
+                    lod = *reinterpret_cast<const uint32_t*>(&(*it));
+                    index = 0;
+                }
+                m.emplace_back(index++, it);
             }
         }
 
@@ -494,6 +502,8 @@ namespace ControlModding
         out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
         out.write(reinterpret_cast<const char*>(mMaterialMaps[0].data()), sizeof(decltype(mMaterialMaps)::value_type::value_type) * mMaterialMaps[0].size());
 
+        size = static_cast<uint32_t>(mAlternateMaterialMaps.size());
+        out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
         for(auto& i: mAlternateMaterialMaps)
         {
             size = static_cast<uint32_t>(std::get<std::string>(i).size());
@@ -538,15 +548,27 @@ namespace ControlModding
             }
         }
     }
-    void BinFBX::RemoveMesh(uint32_t aGroup, uint32_t aMesh)
+    void BinFBX::RemoveMesh(uint32_t aGroup, uint32_t aLOD, uint32_t aIndex)
     {
         ///@todo If the material is no longer used, remove it.
-        mMeshes[aGroup].erase(mMeshes[aGroup].begin() + aMesh);
-        mMaterialMaps[aGroup].erase(mMaterialMaps[aGroup].begin() + aMesh);
-        if(aGroup == 0)
+        // Find the mesh
+        auto it = std::find_if(mMeshes[aGroup].begin(), mMeshes[aGroup].end(), [&](const Mesh& i) 
+            { 
+                return (i.GetIndex() == aIndex) && (i.GetLOD() == aLOD); 
+            });
+        if(it == mMeshes[aGroup].end())
+        {
+            std::cout << "Mesh " << aGroup << "-" << aLOD << "-" << aIndex << " not found." << std::endl;
+            return;
+        }
+        size_t index = it - mMeshes[aGroup].begin();
+        mMeshes[aGroup].erase(it);
+
+        mMaterialMaps[aGroup].erase(mMaterialMaps[aGroup].begin() + index);
+        if(aGroup == 0 && mAlternateMaterialMaps.size() > index)
         {
             /// @todo Need to make sure which mesh group is the one alternate material map is pointing to
-            mAlternateMaterialMaps.erase(mAlternateMaterialMaps.begin() + aMesh);
+            mAlternateMaterialMaps.erase(mAlternateMaterialMaps.begin() + index);
         }
     }
 }

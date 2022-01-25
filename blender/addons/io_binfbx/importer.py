@@ -236,7 +236,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
         MaterialMaps.append(struct.unpack(str(count) + 'I',file.read(count*4)))
 
         # Read Meshes
-        MeshCollectionNames = ["MeshGroupA", "MeshGroupB"]
+        MeshCollectionNames = ["Group0", "Group1"]
         for MeshCollectionName in MeshCollectionNames:        
             ( MeshCount, ) = struct.unpack('I',file.read(4))
             MeshCollection = None

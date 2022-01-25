@@ -34,6 +34,7 @@ namespace ControlModding
         std::string mOutputFile;
         struct MeshReference{
             uint32_t mGroup;
+            uint32_t mLOD;
             uint32_t mIndex;
         };
         std::vector<MeshReference> mRemove{};

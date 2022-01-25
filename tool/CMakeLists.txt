@@ -12,9 +12,6 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-
-find_package(SQLite3)
-
 set(CONTROL_TOOL_HEADERS Tool.h MeshTool.h BinFBX.h)
 set(CONTROL_TOOL_SOURCES Main.cpp MeshTool.cpp BinFBX.cpp)
 

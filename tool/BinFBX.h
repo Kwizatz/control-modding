@@ -98,6 +98,7 @@ namespace ControlModding
         void Write(std::ofstream& out) const;
         void Dump() const;
         size_t GetIndex() const { return mIndex; }
+        size_t GetLOD() const { return mLOD; }
     private:
         //Internal Data-------------------------------------------------------
         size_t mIndex{};
@@ -129,7 +130,7 @@ namespace ControlModding
         BinFBX(const std::vector<uint8_t>& aBuffer);
         void Write(std::string_view aFileName) const;
         void Dump() const;
-        void RemoveMesh(uint32_t aGroup, uint32_t aMesh);
+        void RemoveMesh(uint32_t aGroup, uint32_t aLOD, uint32_t aIndex);
     private:
         std::array<std::vector<uint8_t>, 2> mVertexBuffers{};
         std::vector<uint8_t> mIndexBuffer{};

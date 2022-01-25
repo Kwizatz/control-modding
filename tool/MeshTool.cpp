@@ -124,7 +124,7 @@ namespace ControlModding
                     {
 
                         MeshReference mesh_reference{};
-                        if(i + 2 < argc)
+                        if(i + 3 < argc)
                         {
                             errno = 0;
                             mesh_reference.mGroup = std::strtoul(argv[i + 1], nullptr, 10);
@@ -135,19 +135,27 @@ namespace ControlModding
                                 throw std::runtime_error ( stream.str().c_str() );
                             }
                             errno = 0;
-                            mesh_reference.mIndex = std::strtoul(argv[i + 2], nullptr, 10);
+                            mesh_reference.mLOD = std::strtoul(argv[i + 2], nullptr, 10);
                             if(errno!=0)
                             {
                                 std::ostringstream stream;
-                                stream << "Invalid index number, expected unsigned integer, got " << argv[i + 2] << std::endl;
+                                stream << "Invalid LOD, expected unsigned integer, got " << argv[i + 2] << std::endl;
                                 throw std::runtime_error ( stream.str().c_str() );
+                            }
+                            errno = 0;
+                            mesh_reference.mIndex = std::strtoul(argv[i + 3], nullptr, 10);
+                            if (errno != 0)
+                            {
+                                std::ostringstream stream;
+                                stream << "Invalid index number, expected unsigned integer, got " << argv[i + 3] << std::endl;
+                                throw std::runtime_error(stream.str().c_str());
                             }
                         }
                         else
                         {
                             throw std::runtime_error ( "Remove argument missing, expected \"remove <mesh group> <mesh index>\"" );
                         }
-                        i+=2;
+                        i+=3;
                         mRemove.push_back(mesh_reference);
                     }
                 }
@@ -339,7 +347,15 @@ namespace ControlModding
         ProcessArgs ( argc, argv );
         std::ifstream file;
         file.exceptions ( std::ifstream::failbit | std::ifstream::badbit );
-        file.open ( mInputFile, std::ifstream::in | std::ifstream::binary );
+        try
+        {
+            file.open ( mInputFile, std::ifstream::in | std::ifstream::binary );
+        } 
+        catch ( std::ios_base::failure& e )
+        {
+            throw std::runtime_error ( "Failed to open input file \"" + mInputFile + "\": " + e.what() );
+        }
+
         std::vector<uint8_t> buffer ( ( std::istreambuf_iterator<char> ( file ) ), ( std::istreambuf_iterator<char>() ) );
         file.close();
 
@@ -348,7 +364,7 @@ namespace ControlModding
         // Remove Meshes
         for(auto& mesh_reference : mRemove)
         {
-            binfbx.RemoveMesh(mesh_reference.mGroup, mesh_reference.mIndex);
+            binfbx.RemoveMesh(mesh_reference.mGroup, mesh_reference.mLOD, mesh_reference.mIndex);
         }
 
         if(!mOutputFile.empty())
