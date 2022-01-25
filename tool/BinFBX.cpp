@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2021 Rodrigo Jose Hernandez Cordoba
+Copyright (C) 2021,2022 Rodrigo Jose Hernandez Cordoba
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -211,7 +211,7 @@ namespace ControlModding
         }
     }
 
-    Mesh::Mesh(std::vector<uint8_t>::const_iterator& it)
+    Mesh::Mesh(size_t aIndex, std::vector<uint8_t>::const_iterator& it) : mIndex{aIndex}
     {
         mLOD = *reinterpret_cast<const uint32_t*>(&(*it));
         it += sizeof(uint32_t);
@@ -369,16 +369,16 @@ namespace ControlModding
 
         count = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
-        mMaterialMap.reserve(count);
+        mMaterialMaps[0].reserve(count);
         for (int32_t i = 0; i < count; ++i)
         {
-            mMaterialMap.emplace_back(*reinterpret_cast<const uint32_t*>(&(*it)));
+            mMaterialMaps[0].emplace_back(*reinterpret_cast<const uint32_t*>(&(*it)));
             it += sizeof(uint32_t);
         }
 
         count = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
-        mAlternaleMaterialMaps.reserve(count);
+        mAlternateMaterialMaps.reserve(count);
 
         for (int32_t i = 0; i < count; ++i)
         {
@@ -390,24 +390,23 @@ namespace ControlModding
             it += sizeof(int32_t) + *reinterpret_cast<const int32_t*>(&(*it));
 
             std::vector<uint32_t> v;
-            v.reserve(mMaterialMap.size());
-            for (int32_t j = 0; j < mMaterialMap.size(); ++j)
+            v.reserve(mMaterialMaps[0].size());
+            for (int32_t j = 0; j < mMaterialMaps[0].size(); ++j)
             {
                 v.emplace_back(*reinterpret_cast<const uint32_t*>(&(*it)));
                 it += sizeof(uint32_t);
              }
-            mAlternaleMaterialMaps.emplace_back(std::move(name), std::move(v));
+            mAlternateMaterialMaps.emplace_back(std::move(name), std::move(v));
         }
 
         count = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
-        mSecondMaterialMap.reserve(count);
+        mMaterialMaps[1].reserve(count);
         for (int32_t i = 0; i < count; ++i)
         {
-            mSecondMaterialMap.emplace_back(*reinterpret_cast<const uint32_t*>(&(*it)));
+            mMaterialMaps[1].emplace_back(*reinterpret_cast<const uint32_t*>(&(*it)));
             it += sizeof(float);
         }
-
 
         // Meshes
         for(auto& m : mMeshes)
@@ -417,7 +416,7 @@ namespace ControlModding
             m.reserve(count);
             for (int32_t i = 0; i < count; ++i)
             {
-                m.emplace_back(it);
+                m.emplace_back(i, it);
             }
         }
 
@@ -491,11 +490,11 @@ namespace ControlModding
             i.Write(out);
         }
 
-        size = static_cast<uint32_t>(mMaterialMap.size());
+        size = static_cast<uint32_t>(mMaterialMaps[0].size());
         out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
-        out.write(reinterpret_cast<const char*>(mMaterialMap.data()), sizeof(decltype(mMaterialMap)::value_type) * mMaterialMap.size());
+        out.write(reinterpret_cast<const char*>(mMaterialMaps[0].data()), sizeof(decltype(mMaterialMaps)::value_type::value_type) * mMaterialMaps[0].size());
 
-        for(auto& i: mAlternaleMaterialMaps)
+        for(auto& i: mAlternateMaterialMaps)
         {
             size = static_cast<uint32_t>(std::get<std::string>(i).size());
             out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
@@ -505,9 +504,9 @@ namespace ControlModding
             out.write(reinterpret_cast<const char*>(std::get<std::vector<uint32_t>>(i).data()), sizeof(uint32_t) * std::get<std::vector<uint32_t>>(i).size());
         }
 
-        size = static_cast<uint32_t>(mSecondMaterialMap.size());
+        size = static_cast<uint32_t>(mMaterialMaps[1].size());
         out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
-        out.write(reinterpret_cast<const char*>(mSecondMaterialMap.data()), sizeof(decltype(mSecondMaterialMap)::value_type) * mSecondMaterialMap.size());
+        out.write(reinterpret_cast<const char*>(mMaterialMaps[1].data()), sizeof(decltype(mMaterialMaps)::value_type::value_type) * mMaterialMaps[1].size());
 
         for(auto& i: mMeshes)
         {
@@ -537,6 +536,17 @@ namespace ControlModding
             {
                 j.Dump();
             }
+        }
+    }
+    void BinFBX::RemoveMesh(uint32_t aGroup, uint32_t aMesh)
+    {
+        ///@todo If the material is no longer used, remove it.
+        mMeshes[aGroup].erase(mMeshes[aGroup].begin() + aMesh);
+        mMaterialMaps[aGroup].erase(mMaterialMaps[aGroup].begin() + aMesh);
+        if(aGroup == 0)
+        {
+            /// @todo Need to make sure which mesh group is the one alternate material map is pointing to
+            mAlternateMaterialMaps.erase(mAlternateMaterialMaps.begin() + aMesh);
         }
     }
 }

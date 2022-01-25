@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2021 Rodrigo Jose Hernandez Cordoba
+Copyright (C) 2021,2022 Rodrigo Jose Hernandez Cordoba
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,9 +24,6 @@ limitations under the License.
 #include <cstring>
 #include <cmath>
 #include <bitset>
-#ifdef USE_SQLITE
-#include <sqlite3.h>
-#endif
 
 #include "BinFBX.h"
 #include "MeshTool.h"
@@ -123,13 +120,36 @@ namespace ControlModding
                         i++;
                         mOutputFile = argv[i];
                     }
-#ifdef USE_SQLITE
-                    else if ( strncmp ( &argv[i][2], "sqlite", sizeof ( "sqlite" ) ) == 0 )
+                    else if ( strncmp ( &argv[i][2], "remove", sizeof ( "remove" ) ) == 0 )
                     {
-                        i++;
-                        mSqliteFile = argv[i];
+
+                        MeshReference mesh_reference{};
+                        if(i + 2 < argc)
+                        {
+                            errno = 0;
+                            mesh_reference.mGroup = std::strtoul(argv[i + 1], nullptr, 10);
+                            if(errno!=0)
+                            {
+                                std::ostringstream stream;
+                                stream << "Invalid group number, expected unsigned integer, got " << argv[i + 1] << std::endl;
+                                throw std::runtime_error ( stream.str().c_str() );
+                            }
+                            errno = 0;
+                            mesh_reference.mIndex = std::strtoul(argv[i + 2], nullptr, 10);
+                            if(errno!=0)
+                            {
+                                std::ostringstream stream;
+                                stream << "Invalid index number, expected unsigned integer, got " << argv[i + 2] << std::endl;
+                                throw std::runtime_error ( stream.str().c_str() );
+                            }
+                        }
+                        else
+                        {
+                            throw std::runtime_error ( "Remove argument missing, expected \"remove <mesh group> <mesh index>\"" );
+                        }
+                        i+=2;
+                        mRemove.push_back(mesh_reference);
                     }
-#endif
                 }
                 else
                 {
@@ -143,12 +163,6 @@ namespace ControlModding
                         i++;
                         mOutputFile = argv[i];
                         break;
-#ifdef USE_SQLITE
-                    case 's':
-                        i++;
-                        mSqliteFile = argv[i];
-                        break;
-#endif
                     }
                 }
             }
@@ -330,6 +344,13 @@ namespace ControlModding
         file.close();
 
         BinFBX binfbx{buffer};
+
+        // Remove Meshes
+        for(auto& mesh_reference : mRemove)
+        {
+            binfbx.RemoveMesh(mesh_reference.mGroup, mesh_reference.mIndex);
+        }
+
         if(!mOutputFile.empty())
         {
             binfbx.Write(mOutputFile);
@@ -339,205 +360,5 @@ namespace ControlModding
             binfbx.Dump();
         }
         return 0;
-#if 0
-        uint8_t* index = buffer.data();
-        Header* header = reinterpret_cast<Header*>(buffer.data());
-        if(header->Magick!=BinFBXMagick)
-        {
-            std::cout << "Not a BinFBX file " << header->Magick << std::endl;
-            return -1;
-        }        
-#if 0
-#ifdef USE_SQLITE
-        sqlite3 *db;
-        if(!mSqliteFile.empty())
-        {
-            sqlite3_stmt *res;
-            
-            int rc = sqlite3_open(mSqliteFile.c_str(), &db);
-            
-            if (rc != SQLITE_OK) 
-            {
-                
-                std::cerr << "Cannot open database: " << sqlite3_errmsg(db) << std::endl;
-                sqlite3_close(db);                
-                return 1;
-            }
-        }
-#endif
-#endif
-
-        index = PrintSingle<uint32_t>(index,"Magick");
-        index = PrintSingle<uint32_t>(index,"Attribute Buffer Size");
-        index = PrintSingle<uint32_t>(index,"Vertex Buffer Size");
-        index = PrintSingle<uint32_t>(index,"Index Count");
-        index = PrintSingle<uint32_t>(index,"Index Size");
-        
-        // Move Past the Buffers
-        index += header->VertexBufferSizes[0] + header->VertexBufferSizes[1] + (header->IndexCount * header->IndexSize);
-
-        uint32_t JointCount = *reinterpret_cast<uint32_t*>(index);
-        std::cout << "Joint Count " << JointCount << std::endl;
-        index += sizeof(uint32_t);
-#if 0
-#ifdef USE_SQLITE
-        //std::cout << "Working on " << mInputFile << std::endl;
-        char *errmsg{nullptr};
-        int rc = sqlite3_exec(
-        db,
-        R"(CREATE TABLE IF NOT EXISTS general (
-            file_path TEXT PRIMARY KEY,
-            attribute_buffer_size INTEGER NOT NULL,
-            vertex_buffer_size INTEGER NOT NULL,
-            index_count INTEGER NOT NULL,
-            index_size INTEGER NOT NULL,
-            joint_count INTEGER NOT NULL
-        );)",
-        nullptr,//int (*callback)(void*,int,char**,char**),  /* Callback function */
-        nullptr,                                             /* 1st argument to callback */
-        &errmsg);
-
-        if(errmsg != nullptr)
-        {
-            std::cerr << "Table creation Failed: " << errmsg << std::endl;
-            sqlite3_free(errmsg);
-        }
-
-        std::stringstream insert;
-        insert << "INSERT OR REPLACE INTO general (file_path, attribute_buffer_size, vertex_buffer_size, index_count, index_size, joint_count) values " <<
-        "(\"" << mInputFile << "\"," << binfbx->AttributeBufferSize << "," << binfbx->VertexBufferSize << "," << binfbx->IndexCount << "," << binfbx->IndexSize << ","<< JointCount <<");";
-
-        rc = sqlite3_exec(
-        db,
-        insert.str().c_str(),
-        nullptr,
-        nullptr,
-        &errmsg);
-
-        if(errmsg != nullptr)
-        {
-            std::cerr << "Insert Failed: " << errmsg << std::endl;
-            sqlite3_free(errmsg);
-        }
-
-        sqlite3_close(db);
-        return 0;
-#endif
-#endif
-        for(uint32_t i = 0; i < JointCount; ++i)
-        {
-            index = PrintArray<char>(index,"Joint Index " + std::to_string(i) + " Name");
-            index = PrintArrayCount<float>(index,"Matrix 1",3);
-            index = PrintArrayCount<float>(index,"Matrix 2",3);
-            index = PrintArrayCount<float>(index,"Matrix 3",3);
-            index = PrintArrayCount<float>(index,"Matrix 4",3);
-            index = PrintArrayCount<float>(index,"Envelope Vector",3);
-            index = PrintSingle<float>(index,"Envelope Radius");
-            index = PrintSingle<int32_t>(index,"Parent Index");
-        }
-
-        index = PrintArrayCount<int32_t>(index,"Unknown Ints", 2);
-        index = PrintSingle<float>(index, "Unknown Float");
-        index = PrintArray<float>(index,"Unknown Depth Buffer");
-        index = PrintSingle<float>(index, "Unknown Float");
-        index = PrintArrayCount<float>(index,"Unknown Vec3", 3);
-        index = PrintSingle<float>(index, "Unknown Float");
-        index = PrintArrayCount<float>(index,"Unknown Vec3", 3);
-        index = PrintArrayCount<float>(index,"Unknown Vec3", 3);
-
-        index = PrintSingle<uint32_t>(index, "LOD Count");
-
-        uint32_t material_count;
-        index = PrintSingle<uint32_t>(index, "Material Count", &material_count);
-
-        //---- Materials
-        for(uint32_t i = 0; i < material_count;++i )
-        {
-            index = PrintSingle<uint32_t>(index,"Material File Magick Always (7)");
-            index = PrintArrayCount<uint8_t>(index,"Material Global ID",8);
-            std::cout << std::dec;
-
-            index = PrintArray<char>(index,"Material Name");
-            index = PrintArray<char>(index,"Material Type");
-            index = PrintArray<char>(index,"Material Path");
-
-            index = PrintArrayCount<uint32_t>(index,"Unknown Array of 6", 6);
-
-            //bPrint = false;
-            uint32_t UniformCount;
-            index = PrintSingle<uint32_t>(index,"Uniform Count",&UniformCount);
-
-            for(uint32_t j=0;j<UniformCount;++j)
-            {
-                index = PrintArray<char>(index,"Uniform Variable Name");
-                uint32_t UniformType;
-                index = PrintSingle<uint32_t>(index,"Uniform Variable Type",&UniformType);
-            
-                switch(UniformType)
-                {
-                case Float:
-                    index = PrintSingle<float>(index,"Float");
-                    break;
-                case Range:
-                    index = PrintArrayCount<float>(index,"Range",2);
-                    break;
-                case Color:
-                    index = PrintArrayCount<float>(index,"Color",4);
-                    break;
-                case Vector:
-                    index = PrintArrayCount<float>(index,"Vec3",3);
-                    break;
-                case TextureMap:
-                    index = PrintArray<char>(index,"TextureMap");
-                    break;
-                case TextureSampler:
-                    break;
-                case Boolean:
-                    index = PrintSingle<uint32_t>(index,"Boolean");
-                    break;
-                }
-            }
-            bPrint = true;
-        }
-
-        uint32_t material_map{};
-        index = PrintArray<uint32_t>(index,"Material Map",&material_map);
-        
-        uint32_t alternate_material_count{};
-        index = PrintSingle<uint32_t>(index,"Alternate Material Count", &alternate_material_count);
-
-        for(uint32_t i = 0; i<alternate_material_count;++i)
-        {
-            index =  PrintArray<char>(index,"Alt Material");
-            index =  PrintArrayCount<uint32_t>(index,"Material Map",material_map);
-        }
-
-        index = PrintArray<uint32_t>(index, "Unknown Int Array");
-
-        uint32_t submesh_count1;
-        index = PrintSingle<uint32_t>(index,"SubMesh Count 1",&submesh_count1);
-        std::cout<< "---------------------------------------------------------------------------" << std::endl;
-        for(uint32_t i = 0; i<submesh_count1;++i)
-        {
-            index = PrintMesh(index,std::string("SM 1 Mesh ")+std::to_string(i)+std::string(" LOD"));
-            std::cout<< "---------------------------------------------------------------------------" << std::endl;
-        }
-
-        std::cout << std::endl;
-
-        uint32_t submesh_count2;
-        index = PrintSingle<uint32_t>(index,"SubMesh Count 2",&submesh_count2);
-        std::cout<< "---------------------------------------------------------------------------" << std::endl;
-        for(uint32_t i = 0; i< submesh_count2;++i)
-        {
-            index = PrintMesh(index,std::string("SM 2 Mesh ")+std::to_string(i)+std::string(" LOD"));
-            std::cout<< "---------------------------------------------------------------------------" << std::endl;
-        }
-
-        index = PrintArray<uint32_t>(index, "Unknown Array, usually zero");
-        index = PrintSingle<float>(index,"Unknown Float");
-        index = PrintArray<float>(index, "Unknown Array of floats");
-        return 0;
-#endif
     }
 }

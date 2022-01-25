@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2021 Rodrigo Jose Hernandez Cordoba
+Copyright (C) 2021,2022 Rodrigo Jose Hernandez Cordoba
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef CONTROL_TOOL_MESH_H
 #define CONTROL_TOOL_MESH_H
 #include <string>
+#include <vector>
 #include <stdexcept>
 #include "Tool.h"
 
@@ -31,9 +32,11 @@ namespace ControlModding
         void ProcessArgs ( int argc, char** argv );
         std::string mInputFile;
         std::string mOutputFile;
-#ifdef USE_SQLITE
-        std::string mSqliteFile;
-#endif
+        struct MeshReference{
+            uint32_t mGroup;
+            uint32_t mIndex;
+        };
+        std::vector<MeshReference> mRemove{};
     };
 }
 #endif

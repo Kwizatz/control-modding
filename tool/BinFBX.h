@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2021 Rodrigo Jose Hernandez Cordoba
+Copyright (C) 2021,2022 Rodrigo Jose Hernandez Cordoba
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -94,29 +94,33 @@ namespace ControlModding
     class Mesh
     {
     public:
-        Mesh(std::vector<uint8_t>::const_iterator& it);
+        Mesh(size_t aIndex, std::vector<uint8_t>::const_iterator& it);
         void Write(std::ofstream& out) const;
         void Dump() const;
+        size_t GetIndex() const { return mIndex; }
     private:
-            uint32_t mLOD{};
-            uint32_t mVertexCount{};
-            uint32_t mTriangleCount{};
-            std::array<uint32_t,2> mVertexBufferOffsets{};
-            uint32_t mIndexBufferOffset{};
+        //Internal Data-------------------------------------------------------
+        size_t mIndex{};
+        //External Data-------------------------------------------------------
+        uint32_t mLOD{};
+        uint32_t mVertexCount{};
+        uint32_t mTriangleCount{};
+        std::array<uint32_t,2> mVertexBufferOffsets{};
+        uint32_t mIndexBufferOffset{};
 
-            int32_t mUnknown0{};
+        int32_t mUnknown0{};
 
-            std::array<int32_t, 4> mBoundingSphere{};
-            std::array<int32_t, 6> mBoundingBox{};
+        std::array<int32_t, 4> mBoundingSphere{};
+        std::array<int32_t, 6> mBoundingBox{};
 
-            int32_t mUnknown1{};
-            /// @note IMPORTANT: The AttributeInfo count must be written as a uint_8_t, not an int_32_t.
-            std::vector<AttributeInfo> mAttributeInfos{};
+        int32_t mUnknown1{};
+        /// @note IMPORTANT: The AttributeInfo count must be written as a uint_8_t, not an int_32_t.
+        std::vector<AttributeInfo> mAttributeInfos{};
 
-            int32_t mUnknown2{};
-            float mUnknown3{};
-            uint8_t mUnknown4{};
-            float mUnknown5{};
+        int32_t mUnknown2{};
+        float mUnknown3{};
+        uint8_t mUnknown4{};
+        float mUnknown5{};
     };
 
     class BinFBX
@@ -125,6 +129,7 @@ namespace ControlModding
         BinFBX(const std::vector<uint8_t>& aBuffer);
         void Write(std::string_view aFileName) const;
         void Dump() const;
+        void RemoveMesh(uint32_t aGroup, uint32_t aMesh);
     private:
         std::array<std::vector<uint8_t>, 2> mVertexBuffers{};
         std::vector<uint8_t> mIndexBuffer{};
@@ -143,9 +148,8 @@ namespace ControlModding
         uint32_t mUnknown8{};
         // Materials
         std::vector<Material> mMaterials{};
-        std::vector<uint32_t> mMaterialMap{};
-        std::vector<std::tuple<std::string,std::vector<uint32_t>>> mAlternaleMaterialMaps{};
-        std::vector<uint32_t> mSecondMaterialMap{};
+        std::array<std::vector<uint32_t>,2> mMaterialMaps{};
+        std::vector<std::tuple<std::string,std::vector<uint32_t>>> mAlternateMaterialMaps{};
 
         // Meshes
         std::array<std::vector<Mesh>,2> mMeshes{};

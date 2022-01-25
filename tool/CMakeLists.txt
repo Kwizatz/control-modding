@@ -1,4 +1,4 @@
-# Copyright (C) 2021 Rodrigo Jose Hernandez Cordoba
+# Copyright (C) 2021,2022 Rodrigo Jose Hernandez Cordoba
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License. You may obtain a copy of
@@ -19,8 +19,3 @@ set(CONTROL_TOOL_HEADERS Tool.h MeshTool.h BinFBX.h)
 set(CONTROL_TOOL_SOURCES Main.cpp MeshTool.cpp BinFBX.cpp)
 
 add_executable(control-tool ${CONTROL_TOOL_HEADERS} ${CONTROL_TOOL_SOURCES})
-if(SQLite3_FOUND)
-    target_compile_options(control-tool PRIVATE "-DUSE_SQLITE")
-    target_include_directories(control-tool PRIVATE ${SQLite3_INCLUDE_DIRS})
-    target_link_libraries(control-tool ${SQLite3_LIBRARIES})
-endif()
