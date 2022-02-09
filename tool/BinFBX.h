@@ -37,6 +37,14 @@ namespace ControlModding
         TextureSampler = 0x08,
         Boolean = 0x0C,
     };
+    enum AttributeType : uint8_t {
+        R32G32B32_FLOAT   = 0x2,
+        B8G8R8A8_UNORM    = 0x4,
+        R8G8B8A8_UINT     = 0x5,
+        R16G16_SINT       = 0x7,
+        R16G16B16A16_SINT = 0x8,
+        R16G16B16A16_UINT = 0xd,
+    };
     struct Header{
         uint32_t Magick;
         uint32_t VertexBufferSizes[2];
@@ -45,7 +53,7 @@ namespace ControlModding
     };
     struct AttributeInfo{
         uint8_t Index; // 0x0 = AttributeBuffer, 0x1 = VertexBuffer
-        uint8_t Type;  // 0x4 = B8G8R8A8_UNORM, 0x7 = R16G16_SINT, 0x8 = R16G16B16A16_SINT, 0xd = R16G16B16A16_UINT, 0x5 =  R8G8B8A8_UINT
+        AttributeType Type;  // 0x4 = B8G8R8A8_UNORM, 0x7 = R16G16_SINT, 0x8 = R16G16B16A16_SINT, 0xd = R16G16B16A16_UINT, 0x5 =  R8G8B8A8_UINT
         uint8_t Usage; // 0x1 = Normal, 0x2 = TexCoord, 0x3 = Tangent, 0x5 = Index, 0x6 = Weight
         uint8_t Zero;  // Always 0?
         operator uint32_t() const { return *reinterpret_cast<const uint32_t*>(this); }
@@ -94,14 +102,22 @@ namespace ControlModding
     class Mesh
     {
     public:
-        Mesh(size_t aIndex, std::vector<uint8_t>::const_iterator& it);
+        Mesh(size_t aIndex, const std::array<std::vector<uint8_t>, 2>& aVertexBuffers,const std::vector<uint8_t>& aIndexBuffer, uint32_t aIndexSize, std::vector<uint8_t>::const_iterator& it);
         void Write(std::ofstream& out) const;
         void Dump() const;
         size_t GetIndex() const { return mIndex; }
         size_t GetLOD() const { return mLOD; }
+        std::tuple<size_t, size_t> GetVertexSizes() const;
     private:
         //Internal Data-------------------------------------------------------
         size_t mIndex{};
+        /*  @note 
+            mVertexBuffers and mIndexBuffer are local copies with base 0 indices,
+            used to easilly reconstruct global buffers when removing and adding meshes. 
+        */
+        std::array<std::vector<uint8_t>, 2> mVertexBuffers{};
+        std::vector<uint8_t> mIndexBuffer{};
+        uint32_t mIndexSize;
         //External Data-------------------------------------------------------
         uint32_t mLOD{};
         uint32_t mVertexCount{};

@@ -20,6 +20,7 @@ limitations under the License.
 #include <iostream>
 #include <fstream>
 #include <algorithm>
+#include <unordered_map>
 namespace ControlModding
 {
     Joint::Joint(std::vector<uint8_t>::const_iterator& it) :
@@ -212,7 +213,7 @@ namespace ControlModding
         }
     }
 
-    Mesh::Mesh(size_t aIndex, std::vector<uint8_t>::const_iterator& it) : mIndex{aIndex}
+    Mesh::Mesh(size_t aIndex, const std::array<std::vector<uint8_t>, 2>& aVertexBuffers,const std::vector<uint8_t>& aIndexBuffer, uint32_t aIndexSize, std::vector<uint8_t>::const_iterator& it) : mIndex{aIndex}, mIndexSize{aIndexSize}
     {
         mLOD = *reinterpret_cast<const uint32_t*>(&(*it));
         it += sizeof(uint32_t);
@@ -257,6 +258,82 @@ namespace ControlModding
 
         mUnknown5 = *reinterpret_cast<const float*>(&(*it));
         it += sizeof(float);
+
+        // Build local buffers
+        std::tuple<size_t, size_t> vertex_sizes = GetVertexSizes();
+        std::unordered_map<size_t, size_t> index_to_local{};
+        index_to_local.reserve(mIndexSize * mTriangleCount * 3);
+        mVertexBuffers[0].reserve(mTriangleCount * 3 * std::get<0>(vertex_sizes));
+        mVertexBuffers[1].reserve(mTriangleCount * 3 * std::get<1>(vertex_sizes));
+        mIndexBuffer.resize(mIndexSize * mTriangleCount * 3);
+        const uint8_t* index_data = aIndexBuffer.data() + mIndexBufferOffset;
+        for (size_t i = 0; i < mTriangleCount; ++i)
+        {
+            for (size_t j = 0; j < 3; ++j)
+            {
+                size_t index{};
+                switch(mIndexSize)
+                {
+                case 1:
+                    index = index_data[i * 3 + j];
+                break;
+                case 2:
+                    index = reinterpret_cast<const uint16_t*>(index_data)[i * 3 + j];
+                break;
+                case 4:
+                    index = reinterpret_cast<const uint32_t*>(index_data)[i * 3 + j];
+                break;
+                case 8:
+                    index = reinterpret_cast<const uint64_t*>(index_data)[i * 3 + j];
+                break;
+                }
+                if(index_to_local.find(index) == index_to_local.end())
+                {
+                    index_to_local[index] = index_to_local.size();
+                    mVertexBuffers[0].insert(mVertexBuffers[0].end(), aVertexBuffers[0].begin() + (std::get<0>(vertex_sizes) * index), aVertexBuffers[0].begin() + (std::get<0>(vertex_sizes) * index) + std::get<0>(vertex_sizes));
+                    mVertexBuffers[1].insert(mVertexBuffers[1].end(), aVertexBuffers[1].begin() + (std::get<1>(vertex_sizes) * index), aVertexBuffers[1].begin() + (std::get<1>(vertex_sizes) * index) + std::get<1>(vertex_sizes));
+                }
+                switch(mIndexSize)
+                {
+                case 1:
+                    mIndexBuffer[i * 3 + j] = index_to_local[index_data[i * 3 + j]];
+                break;
+                case 2:
+                    reinterpret_cast<uint16_t*>(mIndexBuffer.data())[i * 3 + j] = index_to_local[ reinterpret_cast<const uint16_t*>(index_data)[i * 3 + j]];
+                break;
+                case 4:
+                    reinterpret_cast<uint32_t*>(mIndexBuffer.data())[i * 3 + j] = index_to_local[ reinterpret_cast<const uint32_t*>(index_data)[i * 3 + j]];
+                break;
+                case 8:
+                    reinterpret_cast<uint64_t*>(mIndexBuffer.data())[i * 3 + j] = index_to_local[ reinterpret_cast<const uint64_t*>(index_data)[i * 3 + j]];
+                break;
+                }                
+            }
+        }
+    }
+
+    std::tuple<size_t, size_t> Mesh::GetVertexSizes() const
+    {
+        std::tuple<size_t, size_t> result{0, 0};
+        for(auto i: mAttributeInfos)
+        {
+            switch(i.Type)
+            {
+            case AttributeType::R32G32B32_FLOAT:
+                *((i.Index) ? &std::get<0>(result) : &std::get<1>(result)) += 12;
+            break;
+                case AttributeType::B8G8R8A8_UNORM:
+                case AttributeType::R8G8B8A8_UINT:
+                case AttributeType::R16G16_SINT:
+                *((i.Index) ? &std::get<0>(result) : &std::get<1>(result)) += 4;
+            break;
+                case AttributeType::R16G16B16A16_SINT:
+                case AttributeType::R16G16B16A16_UINT:
+                *((i.Index) ? &std::get<0>(result) : &std::get<1>(result)) += 8;
+            break;
+            }
+        }
+        return result;
     }
 
     void Mesh::Write(std::ofstream& out) const
@@ -292,6 +369,35 @@ namespace ControlModding
         }
         std::cout << std::endl;
         std::cout << "IndexBufferOffset: " << mIndexBufferOffset << std::endl;
+#if 0
+        std::cout << "Indices: " << std::endl;
+        const uint8_t* indices = mIndexBuffer.data();
+        for (size_t i = 0; i < mTriangleCount * 3; ++i)
+        {
+            switch(mIndexSize)
+            {
+            case 1:
+                std::cout << static_cast<size_t>(indices[i]) << " ";
+                ++indices;
+            break;
+            case 2:
+                std::cout << *reinterpret_cast<const uint16_t*>(indices) << " ";
+                indices+=2;
+            break;
+            case 4:
+                std::cout << *reinterpret_cast<const uint32_t*>(indices) << " ";
+                indices+=4;
+            break;
+            case 8:
+                std::cout << *reinterpret_cast<const uint64_t*>(indices) << " ";
+                indices+=8;
+            break;
+            }
+        }
+        std::cout << std::endl;
+        std::tuple<size_t, size_t> vertex_sizes = GetVertexSizes();
+        std::cout << "VertexSizes: " << std::get<0>(vertex_sizes) << " " << std::get<1>(vertex_sizes) << std::endl;
+#endif
     }
 
     BinFBX::BinFBX(const std::vector<uint8_t>& aBuffer)
@@ -424,7 +530,7 @@ namespace ControlModding
                     lod = *reinterpret_cast<const uint32_t*>(&(*it));
                     index = 0;
                 }
-                m.emplace_back(index++, it);
+                m.emplace_back(index++, mVertexBuffers, mIndexBuffer, mIndexSize, it);
             }
         }
 
