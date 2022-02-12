@@ -319,6 +319,11 @@ class BINFBX_OT_importer(bpy.types.Operator):
                     for k in range(len(mesh_data.uv_layers[j].data)):
                         mesh_data.uv_layers[j].data[k].uv = UVs[j][mesh_data.loops[k].vertex_index]
 
+                # Remove Unused Vertices for this mesh
+                bpy.ops.object.editmode_toggle()
+                bpy.ops.mesh.delete_loose()
+                bpy.ops.object.editmode_toggle()
+
                 # Unknown
                 struct.unpack('i',file.read(4))
                 # Unknown
