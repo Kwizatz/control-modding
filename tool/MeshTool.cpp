@@ -171,10 +171,16 @@ namespace ControlModding
                         i++;
                         mOutputFile = argv[i];
                         break;
+                    default:
+                        {
+                            std::ostringstream stream;
+                            stream << "Unknown Option" << argv[i] << std::endl;
+                            throw std::runtime_error(stream.str().c_str());
+                        }
                     }
                 }
             }
-            else
+            else if(mInputFile.empty())
             {
                 mInputFile = argv[i];
             }

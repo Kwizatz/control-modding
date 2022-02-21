@@ -105,6 +105,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
             IndexFormat = "3I"
 
         ( JointCount, ) = struct.unpack('I',file.read(4))
+        print("JointCount:", JointCount)
         # Read Skeleton
 
         if JointCount > 0:
@@ -120,10 +121,12 @@ class BINFBX_OT_importer(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='EDIT')
 
             joints = []
+            joint_names = []
             # Sadly a parent joint may appear after its child, so we need to do multiple passes
             # Pass 1 - Collect Data
             for i in range(JointCount):
                 JointName = file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
+                joint_names.append(JointName)
                 matrix = struct.unpack('12f',file.read(4*12))
                 tail = mathutils.Vector(struct.unpack('3f',file.read(12)))
                 radius = struct.unpack('f',file.read(4))[0]
@@ -141,13 +144,26 @@ class BINFBX_OT_importer(bpy.types.Operator):
                     armature_data.edit_bones[joint_index].parent = armature_data.edit_bones[joints[joint_index][2]]
                 armature_data.edit_bones[joint_index].matrix = joints[joint_index][1]
                 # Avoid zero length bones as well as unused radius and tail going to the origin 
-                if (joints[joint_index][4] == 0.0 and joints[joint_index][3] == mathutils.Vector((0.0,0.0,0.0))) or (armature_data.edit_bones[joint_index].head == joints[joint_index][3]):
+                if armature_data.edit_bones[joint_index].name == "C_upperTeeth_JNT":
+                    # These 3 are the same, still the check bellow fails, use an epislon to do the check
+                    print(armature_data.edit_bones[joint_index].name,"Stored Tail", joints[joint_index][3], "Tail", armature_data.edit_bones[joint_index].tail, "Head", armature_data.edit_bones[joint_index].head)
+
+                if joints[joint_index][3] == armature_data.edit_bones[joint_index].head or joints[joint_index][3].length == 0.0:
+                    print("Short Bone:", armature_data.edit_bones[joint_index].name)
                     armature_data.edit_bones[joint_index].length = 0.01
                 else:
                     armature_data.edit_bones[joint_index].tail = joints[joint_index][3]
+
+                if joints[joint_index][4] > 0.0:
                     armature_data.edit_bones[joint_index].tail_radius = joints[joint_index][4]
                     armature_data.edit_bones[joint_index].head_radius = joints[joint_index][4]
+
+            print("Created Bones:", len(armature_data.edit_bones))
             bpy.ops.object.mode_set(mode='OBJECT')
+            print("Total Bones:", len(armature_data.bones))
+            for joint_name in joint_names:
+                if joint_name not in armature_data.bones:
+                    print("Missing Bone:", joint_name)
 
         # Skip Unknown Data
         struct.unpack("II",file.read(8))
@@ -211,8 +227,8 @@ class BINFBX_OT_importer(bpy.types.Operator):
                     if os.path.exists(image_path.strip()):
                         # TODO: Load Image as DDS and add to material
                         print("Image Path", image_path, "exists")
-                    else:
-                        print(image_path, "does not exist, fill the Runtime Data Path field to change where the textures are looked for")
+                    #else:
+                    #    print(image_path, "does not exist, fill the Runtime Data Path field to change where the textures are looked for")
                 elif UniformType == TEXTURESAMPLER:
                     pass
                 elif UniformType == BOOLEAN:
@@ -292,32 +308,81 @@ class BINFBX_OT_importer(bpy.types.Operator):
                     FormatStrings[BufferIndex] += Format[Type]
                     AttribIndex[BufferIndex] += FormatIndexCount[Type]
 
+                Normals = []
+                for j in range(SemanticCount[NORMAL]):
+                    Normals.append([])
                 UVs = []
                 for j in range(SemanticCount[TEXCOORD]):
                     UVs.append([])
-
-                Vertices = []
-                Faces = []
+                Tangents = []
+                for j in range(SemanticCount[TANGENT]):
+                    Tangents.append([])
+                Indices = []
+                for j in range(SemanticCount[INDEX]):
+                    Indices.append([])
+                Weights = []
+                for j in range(SemanticCount[WEIGHT]):
+                    Weights.append([])
+                Positions = []
                 for j in range(2):
                     for vertex in struct.iter_unpack(FormatStrings[j], VertexBuffers[j][VertexOffsets[j]:VertexOffsets[j]  + (VertexCount*struct.calcsize(FormatStrings[j]))]):
                         for attrib in VertexAttribs[j]:
                             if attrib["Semantic"] == POSITION:
                                 assert attrib["Type"] == R32G32B32_FLOAT # Position is always 3 floats
                                 assert attrib["SemanticIndex"] == 0 # There should only be one position semantic
-                                v = []
-                                for k in range(attrib["IndexCount"]):
-                                    v.append(vertex[attrib["Index"] + k])
-                                Vertices.append(v)
-                            if attrib["Semantic"] == TEXCOORD:
+                                Positions.append((vertex[attrib["Index"]],vertex[attrib["Index"] + 1],vertex[attrib["Index"] + 2]))
+
+                            elif attrib["Semantic"] == NORMAL:
+                                assert attrib["Type"] == R16G16B16A16_SINT # We're only supporting R16G16B16A16_SINT normals for now
+                                Normals[attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/32767.0,vertex[attrib["Index"] + 1]/32767.0,vertex[attrib["Index"] + 2]/32767.0))
+
+                            elif attrib["Semantic"] == TEXCOORD:
+                                assert attrib["Type"] == R16G16_SINT # We're only supporting R16G16_SINT texcoords for now
                                 UVs[attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/4095.0, 1.0-(vertex[attrib["Index"] + 1]/4095.0)))
+
+                            elif attrib["Semantic"] == TANGENT:
+                                # This can be commented out as tangents cannot be directly set in Blender
+                                assert attrib["Type"] == B8G8R8A8_UNORM # We're only supporting B8G8R8A8_UNORM tangents for now
+                                Tangents[attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/255.0,vertex[attrib["Index"] + 1]/255.0,vertex[attrib["Index"] + 2]/255.0,vertex[attrib["Index"] + 3]/255.0))
+
+                            elif attrib["Semantic"] == INDEX:
+                                assert attrib["Type"] == R16G16B16A16_UINT # We're only supporting R16G16B16A16_UINT indices for now
+                                Indices[attrib["SemanticIndex"]].append((vertex[attrib["Index"]], vertex[attrib["Index"] + 1], vertex[attrib["Index"] + 2], vertex[attrib["Index"] + 3]))
+                                #if vertex[attrib["Index"]]>=913 or vertex[attrib["Index"] + 1]>=913 or vertex[attrib["Index"] + 2]>=913 or vertex[attrib["Index"] + 3]>=913:
+                                #    print("WARNING: Index out of range:", vertex[attrib["Index"]], vertex[attrib["Index"] + 1], vertex[attrib["Index"] + 2], vertex[attrib["Index"] + 3], j)
+                                
+
+                            elif attrib["Semantic"] == WEIGHT:
+                                assert attrib["Type"] == R8G8B8A8_UINT # We're only supporting R8G8B8A8_UINT weights for now
+                                Weights[attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/255.0, vertex[attrib["Index"] + 1]/255.0, vertex[attrib["Index"] + 2]/255.0, vertex[attrib["Index"] + 3]/255.0))
+
+                Faces = []
                 for j in struct.iter_unpack(IndexFormat, IndexBuffer[IndexOffset*IndexSize:(IndexOffset*IndexSize)+(FaceCount*3*IndexSize)]):
                     Faces.append(j)
-                mesh_data.from_pydata(Vertices, [], Faces)
+                mesh_data.from_pydata(Positions, [], Faces)
+
+                for j in range(SemanticCount[NORMAL]):
+                    # This loop will likely only run once, but it's here for completeness
+                    mesh_data.use_auto_smooth = True
+                    mesh_data.normals_split_custom_set_from_vertices( Normals[j] )
 
                 for j in range(SemanticCount[TEXCOORD]):
                     mesh_data.uv_layers.new(name="UV"+str(j))
                     for k in range(len(mesh_data.uv_layers[j].data)):
                         mesh_data.uv_layers[j].data[k].uv = UVs[j][mesh_data.loops[k].vertex_index]
+
+                # Cannot directly set tangents [sadface]
+                mesh_data.calc_tangents()
+
+                for j in range(SemanticCount[INDEX]):
+                    for vertex_index, bone_indices in enumerate(Indices[j]):
+                        for weight_index, bone_index in enumerate(bone_indices):
+                            #print("Bone Index", bone_index, "Weight",Weights[j][vertex_index][weight_index])
+                            if Weights[j][vertex_index][weight_index] == 0.0:
+                                continue
+                            if armature_data.bones[bone_index].name not in mesh_object.vertex_groups.keys():
+                                mesh_object.vertex_groups.new(name=armature_data.bones[bone_index].name)
+                            mesh_object.vertex_groups[armature_data.bones[bone_index].name].add([vertex_index], Weights[j][vertex_index][weight_index], 'ADD')
 
                 # Remove Unused Vertices for this mesh
                 bpy.ops.object.editmode_toggle()
