@@ -19,6 +19,7 @@ import struct
 import mathutils
 import operator
 import itertools
+import sys
 from multiprocessing import Pool
 from multiprocessing.dummy import Pool as ThreadPool, Lock as ThreadLock
 
@@ -64,6 +65,9 @@ FormatIndexCount = {
 }
 
 right_hand_matrix = mathutils.Matrix(((-1, 0, 0, 0), (0, -1, 0, 0), (0, 0, -1, 0), (0, 0, 0, 1)))
+
+def Vector3IsClose(v1, v2):
+    return abs(v2[0] - v1[0]) < 0.001 and abs(v2[1] - v1[1]) < 0.001 and abs(v2[2] - v1[2]) < 0.001
 class BINFBX_OT_importer(bpy.types.Operator):
 
     '''Imports a binfbx file'''
@@ -71,15 +75,14 @@ class BINFBX_OT_importer(bpy.types.Operator):
     bl_label = "Import BinFBX"
 
     filepath: bpy.props.StringProperty(name="BinFBX", subtype='FILE_PATH')
-    directory: bpy.props.StringProperty(name="Path", subtype='DIR_PATH')
-    runtimedata: bpy.props.StringProperty(name="Runtime Data Path", subtype='DIR_PATH')
+    #directory: bpy.props.StringProperty(name="Path", subtype='DIR_PATH')
+    #runtimedata: bpy.props.StringProperty(name="Runtime Data Path", subtype='DIR_PATH')
 
     @classmethod
     def poll(cls, context):
         return True
 
     def execute(self, context):
-        print("execute")
         self.filepath = bpy.path.ensure_ext(self.filepath, ".binfbx")
         # Open File
         file = open(self.filepath, "rb")
@@ -92,7 +95,6 @@ class BINFBX_OT_importer(bpy.types.Operator):
         VertexBufferSizes = [0, 0]
         (VertexBufferSizes[0], VertexBufferSizes[1], IndexCount, IndexSize) = struct.unpack("IIII",file.read(16))
         # Read Buffers
-        #file.read(AttributeBufferSize + VertexBufferSize + (IndexCount * IndexSize))
         VertexBuffers = [ file.read(VertexBufferSizes[0]), file.read(VertexBufferSizes[1]) ]
         IndexBuffer   = file.read(IndexCount * IndexSize)
 
@@ -107,7 +109,8 @@ class BINFBX_OT_importer(bpy.types.Operator):
         ( JointCount, ) = struct.unpack('I',file.read(4))
         print("JointCount:", JointCount)
         # Read Skeleton
-
+        # We have to keep the stored joint order because of Blender's bone order shenanigans
+        JointNames = []
         if JointCount > 0:
             armature_data = bpy.data.armatures.new("armature")
             armature_object = bpy.data.objects.new("skeleton", armature_data)
@@ -121,12 +124,11 @@ class BINFBX_OT_importer(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='EDIT')
 
             joints = []
-            joint_names = []
             # Sadly a parent joint may appear after its child, so we need to do multiple passes
             # Pass 1 - Collect Data
             for i in range(JointCount):
                 JointName = file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
-                joint_names.append(JointName)
+                JointNames.append(JointName)
                 matrix = struct.unpack('12f',file.read(4*12))
                 tail = mathutils.Vector(struct.unpack('3f',file.read(12)))
                 radius = struct.unpack('f',file.read(4))[0]
@@ -139,31 +141,22 @@ class BINFBX_OT_importer(bpy.types.Operator):
             for joint in joints:
                 armature_data.edit_bones.new(joint[0])
             # Pass 3 - Assign Parent and Matrix
-            for joint_index in range(JointCount):
-                if joints[joint_index][2] >= 0:
-                    armature_data.edit_bones[joint_index].parent = armature_data.edit_bones[joints[joint_index][2]]
-                armature_data.edit_bones[joint_index].matrix = joints[joint_index][1]
-                # Avoid zero length bones as well as unused radius and tail going to the origin 
-                if armature_data.edit_bones[joint_index].name == "C_upperTeeth_JNT":
-                    # These 3 are the same, still the check bellow fails, use an epislon to do the check
-                    print(armature_data.edit_bones[joint_index].name,"Stored Tail", joints[joint_index][3], "Tail", armature_data.edit_bones[joint_index].tail, "Head", armature_data.edit_bones[joint_index].head)
-
-                if joints[joint_index][3] == armature_data.edit_bones[joint_index].head or joints[joint_index][3].length == 0.0:
-                    print("Short Bone:", armature_data.edit_bones[joint_index].name)
-                    armature_data.edit_bones[joint_index].length = 0.01
+            for joint in joints:
+                if joint[2] >= 0:
+                    armature_data.edit_bones[joint[0]].parent = armature_data.edit_bones[joints[joint[2]][0]]
+                armature_data.edit_bones[joint[0]].matrix = joint[1]
+                # Avoid zero length bones as well as unused radius and tail going to the origin
+                if Vector3IsClose(joint[3] , armature_data.edit_bones[joint[0]].head) or joint[3].length == 0.0:
+                    armature_data.edit_bones[joint[0]].length = 0.01
                 else:
-                    armature_data.edit_bones[joint_index].tail = joints[joint_index][3]
+                    armature_data.edit_bones[joint[0]].tail = joint[3]
 
-                if joints[joint_index][4] > 0.0:
-                    armature_data.edit_bones[joint_index].tail_radius = joints[joint_index][4]
-                    armature_data.edit_bones[joint_index].head_radius = joints[joint_index][4]
+                if joint[4] > 0.0:
+                    armature_data.edit_bones[joint[0]].tail_radius = joint[4]
+                    armature_data.edit_bones[joint[0]].head_radius = joint[4]
 
-            print("Created Bones:", len(armature_data.edit_bones))
             bpy.ops.object.mode_set(mode='OBJECT')
-            print("Total Bones:", len(armature_data.bones))
-            for joint_name in joint_names:
-                if joint_name not in armature_data.bones:
-                    print("Missing Bone:", joint_name)
+            assert(len(armature_data.bones) == JointCount)
 
         # Skip Unknown Data
         struct.unpack("II",file.read(8))
@@ -205,7 +198,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
 
             ( UniformCount, ) = struct.unpack('I',file.read(4))
 
-            print("Uniform Count:", UniformCount)
+            #print("Uniform Count:", UniformCount)
             for j in range(UniformCount):
                 #Uniform Name
                 file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
@@ -374,20 +367,27 @@ class BINFBX_OT_importer(bpy.types.Operator):
                 # Cannot directly set tangents [sadface]
                 mesh_data.calc_tangents()
 
-                for j in range(SemanticCount[INDEX]):
-                    for vertex_index, bone_indices in enumerate(Indices[j]):
-                        for weight_index, bone_index in enumerate(bone_indices):
-                            #print("Bone Index", bone_index, "Weight",Weights[j][vertex_index][weight_index])
-                            if Weights[j][vertex_index][weight_index] == 0.0:
-                                continue
-                            if armature_data.bones[bone_index].name not in mesh_object.vertex_groups.keys():
-                                mesh_object.vertex_groups.new(name=armature_data.bones[bone_index].name)
-                            mesh_object.vertex_groups[armature_data.bones[bone_index].name].add([vertex_index], Weights[j][vertex_index][weight_index], 'ADD')
+                armature_modifier = mesh_object.modifiers.new('armature', 'ARMATURE')
+                armature_modifier.object = armature_object
+                armature_modifier.use_bone_envelopes = False
+                armature_modifier.use_vertex_groups = True
 
+
+                for vertex in mesh_data.vertices:
+                    for j in range(SemanticCount[INDEX]):
+                        for k in range(4):
+                            # Skip 0 weights or vertices already added
+                            if Weights[j][vertex.index][k] == 0:
+                                continue
+                            if JointNames[Indices[j][vertex.index][k]] not in mesh_object.vertex_groups:
+                                #print("Added Group",armature_data.bones[Indices[j][loop.vertex_index][k]].name)
+                                mesh_object.vertex_groups.new(name=JointNames[Indices[j][vertex.index][k]])
+                            mesh_object.vertex_groups[JointNames[Indices[j][vertex.index][k]]].add([vertex.index], Weights[j][vertex.index][k], 'ADD')
+               
                 # Remove Unused Vertices for this mesh
-                bpy.ops.object.editmode_toggle()
-                bpy.ops.mesh.delete_loose()
-                bpy.ops.object.editmode_toggle()
+                #bpy.ops.object.editmode_toggle()
+                #bpy.ops.mesh.delete_loose()
+                #bpy.ops.object.editmode_toggle()
 
                 # Unknown
                 struct.unpack('i',file.read(4))
@@ -406,6 +406,5 @@ class BINFBX_OT_importer(bpy.types.Operator):
 
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
-        #context.window_manager.modal_handler_add(self)
         return {"RUNNING_MODAL"}
 
