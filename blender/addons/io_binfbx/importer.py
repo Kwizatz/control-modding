@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from numpy import indices
 import bpy
 import os
 import os.path
@@ -178,7 +179,6 @@ class BINFBX_OT_importer(bpy.types.Operator):
         Materials = []
         ( MaterialCount, ) = struct.unpack('I',file.read(4))
         for i in range(MaterialCount):
-            print("Material", i)
             # Material Magick
             struct.unpack("I",file.read(4))
             # Material ID
@@ -216,7 +216,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
                     image_path = file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
                     image_path = image_path.replace("\\", os.sep)
                     image_path = image_path.replace("/", os.sep)
-                    image_path = image_path.replace("runtimedata", self.runtimedata)
+                    #image_path = image_path.replace("runtimedata", self.runtimedata)
                     if os.path.exists(image_path.strip()):
                         # TODO: Load Image as DDS and add to material
                         print("Image Path", image_path, "exists")
@@ -229,13 +229,13 @@ class BINFBX_OT_importer(bpy.types.Operator):
             Materials.append(material)
 
         ( MaterialMapCount, ) = struct.unpack('I',file.read(4))
-        print("Material Map Count:", MaterialMapCount)
+        #print("Material Map Count:", MaterialMapCount)
         # First Material Map
         MaterialMaps = []
         MaterialMaps.append(struct.unpack(str(MaterialMapCount) + 'I',file.read(MaterialMapCount*4)))
 
         ( AlternateMaterialMapCount, ) = struct.unpack('I',file.read(4))
-        print("Alternate Material Map Count:", AlternateMaterialMapCount)
+        #print("Alternate Material Map Count:", AlternateMaterialMapCount)
         for i in range(AlternateMaterialMapCount):
             file.read(struct.unpack('I',file.read(4))[0]).decode('utf-8')
             struct.unpack(str(MaterialMapCount) + 'I',file.read(MaterialMapCount*4))
@@ -246,6 +246,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
 
         # Read Meshes
         MeshCollectionNames = ["Group0", "Group1"]
+        Meshes = {}
         for MeshCollectionName in MeshCollectionNames:        
             ( MeshCount, ) = struct.unpack('I',file.read(4))
             MeshCollection = None
@@ -265,8 +266,8 @@ class BINFBX_OT_importer(bpy.types.Operator):
                     LODMeshIndex = 0
                 mesh_data = bpy.data.meshes.new(MeshCollectionName + "LOD-"+str(LOD)+"-Mesh-"+str(LODMeshIndex))
                 mesh_object = bpy.data.objects.new(MeshCollectionName + "LOD-"+str(LOD)+"-Mesh-"+str(LODMeshIndex), mesh_data)
+                print("LOD",LOD,"Mesh",LODMeshIndex)
                 LODMeshIndex += 1
-
                 LODCollection.objects.link(mesh_object)
 
                 bpy.ops.object.select_all(action='DESELECT')
@@ -301,62 +302,107 @@ class BINFBX_OT_importer(bpy.types.Operator):
                     FormatStrings[BufferIndex] += Format[Type]
                     AttribIndex[BufferIndex] += FormatIndexCount[Type]
 
+                # Unknown
+                struct.unpack('i',file.read(4))
+                # Unknown
+                struct.unpack('f',file.read(4))
+                # Unknown
+                struct.unpack('B',file.read(1))
+                # Unknown
+                struct.unpack('f',file.read(4))
+
+                # At this point all data is read from the file, so we can start creating the mesh
+
+                # Avoid extracting data more than once if the vertex range is the same
+                if (VertexCount, VertexOffsets[0], VertexOffsets[1]) not in Meshes:                
+                    print("Calculating Mesh Data for",VertexCount, VertexOffsets[0], VertexOffsets[1])
+                    MeshData = {"Positions": [], "Normals": [],"UVs": [], "Tangents": [], "Indices": [], "Weights": []}
+                    for j in range(SemanticCount[NORMAL]):
+                        MeshData["Normals"].append([])
+                    for j in range(SemanticCount[TEXCOORD]):
+                        MeshData["UVs"].append([])
+                    for j in range(SemanticCount[TANGENT]):
+                        MeshData["Tangents"].append([])
+                    for j in range(SemanticCount[INDEX]):
+                        MeshData["Indices"].append([])
+                    for j in range(SemanticCount[WEIGHT]):
+                        MeshData["Weights"].append([])
+                    for j in range(2):
+                        for vertex in struct.iter_unpack(FormatStrings[j], VertexBuffers[j][VertexOffsets[j]:VertexOffsets[j]  + (VertexCount*struct.calcsize(FormatStrings[j]))]):
+                            for attrib in VertexAttribs[j]:
+                                if attrib["Semantic"] == POSITION:
+                                    assert attrib["Type"] == R32G32B32_FLOAT # Position is always 3 floats
+                                    assert attrib["SemanticIndex"] == 0 # There should only be one position semantic
+                                    MeshData["Positions"].append((vertex[attrib["Index"]],vertex[attrib["Index"] + 1],vertex[attrib["Index"] + 2]))
+
+                                elif attrib["Semantic"] == NORMAL:
+                                    assert attrib["Type"] == R16G16B16A16_SINT # We're only supporting R16G16B16A16_SINT normals for now
+                                    MeshData["Normals"][attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/32767.0,vertex[attrib["Index"] + 1]/32767.0,vertex[attrib["Index"] + 2]/32767.0))
+
+                                elif attrib["Semantic"] == TEXCOORD:
+                                    assert attrib["Type"] == R16G16_SINT # We're only supporting R16G16_SINT texcoords for now
+                                    MeshData["UVs"][attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/4095.0, 1.0-(vertex[attrib["Index"] + 1]/4095.0)))
+
+                                elif attrib["Semantic"] == TANGENT:
+                                    # This can be commented out as tangents cannot be directly set in Blender
+                                    assert attrib["Type"] == B8G8R8A8_UNORM # We're only supporting B8G8R8A8_UNORM tangents for now
+                                    MeshData["Tangents"][attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/255.0,vertex[attrib["Index"] + 1]/255.0,vertex[attrib["Index"] + 2]/255.0,vertex[attrib["Index"] + 3]/255.0))
+
+                                elif attrib["Semantic"] == INDEX:
+                                    assert attrib["Type"] == R16G16B16A16_UINT # We're only supporting R16G16B16A16_UINT indices for now
+                                    MeshData["Indices"][attrib["SemanticIndex"]].append((vertex[attrib["Index"]], vertex[attrib["Index"] + 1], vertex[attrib["Index"] + 2], vertex[attrib["Index"] + 3]))
+
+                                elif attrib["Semantic"] == WEIGHT:
+                                    assert attrib["Type"] == R8G8B8A8_UINT # We're only supporting R8G8B8A8_UINT weights for now
+                                    MeshData["Weights"][attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/255.0, vertex[attrib["Index"] + 1]/255.0, vertex[attrib["Index"] + 2]/255.0, vertex[attrib["Index"] + 3]/255.0))
+                    Meshes[(VertexCount, VertexOffsets[0], VertexOffsets[1])] = MeshData
+                else:
+                    print("Skipped Recalculating Mesh Data for",VertexCount, VertexOffsets[0], VertexOffsets[1])
+
+
+                MeshData = Meshes[(VertexCount, VertexOffsets[0], VertexOffsets[1])]
+                Faces = []
+                Positions = []
                 Normals = []
+                UVs = []
+                Tangents = []
+                Indices = []
+                Weights = []
+                VertexMap = {}
                 for j in range(SemanticCount[NORMAL]):
                     Normals.append([])
-                UVs = []
                 for j in range(SemanticCount[TEXCOORD]):
                     UVs.append([])
-                Tangents = []
                 for j in range(SemanticCount[TANGENT]):
                     Tangents.append([])
-                Indices = []
                 for j in range(SemanticCount[INDEX]):
                     Indices.append([])
-                Weights = []
                 for j in range(SemanticCount[WEIGHT]):
                     Weights.append([])
-                Positions = []
-                for j in range(2):
-                    for vertex in struct.iter_unpack(FormatStrings[j], VertexBuffers[j][VertexOffsets[j]:VertexOffsets[j]  + (VertexCount*struct.calcsize(FormatStrings[j]))]):
-                        for attrib in VertexAttribs[j]:
-                            if attrib["Semantic"] == POSITION:
-                                assert attrib["Type"] == R32G32B32_FLOAT # Position is always 3 floats
-                                assert attrib["SemanticIndex"] == 0 # There should only be one position semantic
-                                Positions.append((vertex[attrib["Index"]],vertex[attrib["Index"] + 1],vertex[attrib["Index"] + 2]))
 
-                            elif attrib["Semantic"] == NORMAL:
-                                assert attrib["Type"] == R16G16B16A16_SINT # We're only supporting R16G16B16A16_SINT normals for now
-                                Normals[attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/32767.0,vertex[attrib["Index"] + 1]/32767.0,vertex[attrib["Index"] + 2]/32767.0))
+                for triangle in struct.iter_unpack(IndexFormat, IndexBuffer[IndexOffset*IndexSize:(IndexOffset*IndexSize)+(FaceCount*3*IndexSize)]):
+                    face = []
+                    for index in triangle:
+                        if index not in VertexMap:
+                            VertexMap[index] = len(Positions)
+                            Positions.append(MeshData["Positions"][index])
+                            for j in range(SemanticCount[NORMAL]):
+                                Normals[j].append(MeshData["Normals"][j][index])
+                            for j in range(SemanticCount[TEXCOORD]):
+                                UVs[j].append(MeshData["UVs"][j][index])
+                            for j in range(SemanticCount[TANGENT]):
+                                Tangents[j].append(MeshData["Tangents"][j][index])
+                            for j in range(SemanticCount[INDEX]):
+                                Indices[j].append(MeshData["Indices"][j][index])
+                            for j in range(SemanticCount[WEIGHT]):
+                                Weights[j].append(MeshData["Weights"][j][index])
+                        face.append(VertexMap[index])
+                    Faces.append(face)
 
-                            elif attrib["Semantic"] == TEXCOORD:
-                                assert attrib["Type"] == R16G16_SINT # We're only supporting R16G16_SINT texcoords for now
-                                UVs[attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/4095.0, 1.0-(vertex[attrib["Index"] + 1]/4095.0)))
-
-                            elif attrib["Semantic"] == TANGENT:
-                                # This can be commented out as tangents cannot be directly set in Blender
-                                assert attrib["Type"] == B8G8R8A8_UNORM # We're only supporting B8G8R8A8_UNORM tangents for now
-                                Tangents[attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/255.0,vertex[attrib["Index"] + 1]/255.0,vertex[attrib["Index"] + 2]/255.0,vertex[attrib["Index"] + 3]/255.0))
-
-                            elif attrib["Semantic"] == INDEX:
-                                assert attrib["Type"] == R16G16B16A16_UINT # We're only supporting R16G16B16A16_UINT indices for now
-                                Indices[attrib["SemanticIndex"]].append((vertex[attrib["Index"]], vertex[attrib["Index"] + 1], vertex[attrib["Index"] + 2], vertex[attrib["Index"] + 3]))
-                                #if vertex[attrib["Index"]]>=913 or vertex[attrib["Index"] + 1]>=913 or vertex[attrib["Index"] + 2]>=913 or vertex[attrib["Index"] + 3]>=913:
-                                #    print("WARNING: Index out of range:", vertex[attrib["Index"]], vertex[attrib["Index"] + 1], vertex[attrib["Index"] + 2], vertex[attrib["Index"] + 3], j)
-                                
-
-                            elif attrib["Semantic"] == WEIGHT:
-                                assert attrib["Type"] == R8G8B8A8_UINT # We're only supporting R8G8B8A8_UINT weights for now
-                                Weights[attrib["SemanticIndex"]].append((vertex[attrib["Index"]]/255.0, vertex[attrib["Index"] + 1]/255.0, vertex[attrib["Index"] + 2]/255.0, vertex[attrib["Index"] + 3]/255.0))
-
-                Faces = []
-                for j in struct.iter_unpack(IndexFormat, IndexBuffer[IndexOffset*IndexSize:(IndexOffset*IndexSize)+(FaceCount*3*IndexSize)]):
-                    Faces.append(j)
                 mesh_data.from_pydata(Positions, [], Faces)
+                mesh_data.use_auto_smooth = True
 
                 for j in range(SemanticCount[NORMAL]):
-                    # This loop will likely only run once, but it's here for completeness
-                    mesh_data.use_auto_smooth = True
                     mesh_data.normals_split_custom_set_from_vertices( Normals[j] )
 
                 for j in range(SemanticCount[TEXCOORD]):
@@ -372,7 +418,6 @@ class BINFBX_OT_importer(bpy.types.Operator):
                 armature_modifier.use_bone_envelopes = False
                 armature_modifier.use_vertex_groups = True
 
-
                 for vertex in mesh_data.vertices:
                     for j in range(SemanticCount[INDEX]):
                         for k in range(4):
@@ -380,23 +425,8 @@ class BINFBX_OT_importer(bpy.types.Operator):
                             if Weights[j][vertex.index][k] == 0:
                                 continue
                             if JointNames[Indices[j][vertex.index][k]] not in mesh_object.vertex_groups:
-                                #print("Added Group",armature_data.bones[Indices[j][loop.vertex_index][k]].name)
                                 mesh_object.vertex_groups.new(name=JointNames[Indices[j][vertex.index][k]])
                             mesh_object.vertex_groups[JointNames[Indices[j][vertex.index][k]]].add([vertex.index], Weights[j][vertex.index][k], 'ADD')
-               
-                # Remove Unused Vertices for this mesh
-                #bpy.ops.object.editmode_toggle()
-                #bpy.ops.mesh.delete_loose()
-                #bpy.ops.object.editmode_toggle()
-
-                # Unknown
-                struct.unpack('i',file.read(4))
-                # Unknown
-                struct.unpack('f',file.read(4))
-                # Unknown
-                struct.unpack('B',file.read(1))
-                # Unknown
-                struct.unpack('f',file.read(4))
 
                 mesh_object.data.materials.append(Materials[MaterialMaps[MeshCollectionNames.index(MeshCollectionName)][i]])
 
