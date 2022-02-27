@@ -12,10 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from . import importer
+import bpy
 bl_info = {
     "name": "Remedy's Control Mesh Format (.binfbx)",
     "author": "Rodrigo Hernandez",
-    "version": (1, 0, 0),
+    "version": (0, 0, 1),
     "blender": (2, 80, 0),
     "location": "File > Import/Export > Control BinFBX",
     "description": "BinFBX importing and exporting",
@@ -24,8 +26,6 @@ bl_info = {
     "tracker_url": "",
     "category": "Import-Export"}
 
-import bpy
-from . import importer
 
 def binfbx_import_menu_func(self, context):
     self.layout.operator(
@@ -37,9 +37,11 @@ def register():
     bpy.utils.register_class(importer.BINFBX_OT_importer)
     bpy.types.TOPBAR_MT_file_import.append(binfbx_import_menu_func)
 
+
 def unregister():
     bpy.utils.unregister_class(importer.BINFBX_OT_importer)
     bpy.types.TOPBAR_MT_file_import.remove(binfbx_import_menu_func)
+
 
 if __name__ == "__main__":
     register()
