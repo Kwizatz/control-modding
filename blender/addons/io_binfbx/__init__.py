@@ -17,7 +17,7 @@ import bpy
 bl_info = {
     "name": "Remedy's Control Mesh Format (.binfbx)",
     "author": "Rodrigo Hernandez",
-    "version": (0, 0, 1),
+    "version": (0, 0, 2),
     "blender": (2, 80, 0),
     "location": "File > Import/Export > Control BinFBX",
     "description": "BinFBX importing and exporting",
@@ -29,17 +29,17 @@ bl_info = {
 
 def binfbx_import_menu_func(self, context):
     self.layout.operator(
-        importer.BINFBX_OT_importer.bl_idname,
+        importer.IMPORT_OT_binfbx.bl_idname,
         text="BinFBX (.binfbx)")
 
 
 def register():
-    bpy.utils.register_class(importer.BINFBX_OT_importer)
+    bpy.utils.register_class(importer.IMPORT_OT_binfbx)
     bpy.types.TOPBAR_MT_file_import.append(binfbx_import_menu_func)
 
 
 def unregister():
-    bpy.utils.unregister_class(importer.BINFBX_OT_importer)
+    bpy.utils.unregister_class(importer.IMPORT_OT_binfbx)
     bpy.types.TOPBAR_MT_file_import.remove(binfbx_import_menu_func)
 
 

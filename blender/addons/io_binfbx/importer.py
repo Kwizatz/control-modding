@@ -25,6 +25,7 @@ from multiprocessing import Pool
 from multiprocessing.dummy import Pool as ThreadPool, Lock as ThreadLock
 
 MAGICK = 0x2e
+
 FLOAT = 0x00
 RANGE = 0x01
 COLOR = 0x03
@@ -65,6 +66,17 @@ FormatIndexCount = {
     R16G16B16A16_UINT: 4
 }
 
+# This is just for testing and debugging
+UniformTypeNames = {
+    FLOAT: 'float',
+    RANGE: 'range',
+    COLOR: 'color',
+    VECTOR: 'vector',
+    TEXTUREMAP: 'texturemap',
+    TEXTURESAMPLER: 'texturesampler',
+    BOOLEAN: 'boolean'
+}
+
 right_hand_matrix = mathutils.Matrix(
     ((-1, 0, 0, 0), (0, 0, -1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))
 
@@ -73,13 +85,16 @@ def Vector3IsClose(v1, v2):
     return abs(v2[0] - v1[0]) < 0.001 and abs(v2[1] - v1[1]) < 0.001 and abs(v2[2] - v1[2]) < 0.001
 
 
-class BINFBX_OT_importer(bpy.types.Operator):
-
+class IMPORT_OT_binfbx(bpy.types.Operator):
     '''Imports a binfbx file'''
     bl_idname = "import.binfbx"
     bl_label = "Import BinFBX"
 
     filepath: bpy.props.StringProperty(name="BinFBX", subtype='FILE_PATH')
+    filter_glob: bpy.props.StringProperty(
+        default="*.binfbx",
+        options={'HIDDEN'},
+    )
 
     @classmethod
     def poll(cls, context):
@@ -88,6 +103,16 @@ class BINFBX_OT_importer(bpy.types.Operator):
     def execute(self, context):
         bpy.context.window.cursor_set("WAIT")
         self.filepath = bpy.path.ensure_ext(self.filepath, ".binfbx")
+        # try to find runtime data path
+        runtime_data_path = os.path.abspath(self.filepath)
+        data_folder_index = max(runtime_data_path.find(
+            os.sep + "data" + os.sep), runtime_data_path.find(os.sep + "data_pc" + os.sep))
+        if data_folder_index != -1:
+            runtime_data_path = runtime_data_path[:data_folder_index]
+            print("Runtime data path found at ", runtime_data_path)
+        else:
+            runtime_data_path = ""
+            print("Runtime data path NOT found.", runtime_data_path)
         # Open File
         file = open(self.filepath, "rb")
         # Read Magick
@@ -153,9 +178,16 @@ class BINFBX_OT_importer(bpy.types.Operator):
             bpy.context.window_manager.progress_end()
 
             # Pass 2 - Create Bones
+            i = 0
+            bpy.context.window_manager.progress_begin(i, len(joints))
             for joint in joints:
                 armature_data.edit_bones.new(joint[0])
+                bpy.context.window_manager.progress_update(i)
+                i += 1
+            bpy.context.window_manager.progress_end()
             # Pass 3 - Assign Parent and Matrix
+            i = 0
+            bpy.context.window_manager.progress_begin(i, len(joints))
             for joint in joints:
                 if joint[2] >= 0:
                     armature_data.edit_bones[joint[0]
@@ -170,6 +202,9 @@ class BINFBX_OT_importer(bpy.types.Operator):
                 if joint[4] > 0.0:
                     armature_data.edit_bones[joint[0]].tail_radius = joint[4]
                     armature_data.edit_bones[joint[0]].head_radius = joint[4]
+                bpy.context.window_manager.progress_update(i)
+                i += 1
+            bpy.context.window_manager.progress_end()
 
             bpy.ops.object.mode_set(mode='OBJECT')
             assert(len(armature_data.bones) == JointCount)
@@ -193,6 +228,7 @@ class BINFBX_OT_importer(bpy.types.Operator):
         # Read Materials
         Materials = []
         (MaterialCount, ) = struct.unpack('I', file.read(4))
+        bpy.context.window_manager.progress_begin(0, JointCount)
         for i in range(MaterialCount):
             # Material Magick
             struct.unpack("I", file.read(4))
@@ -208,15 +244,32 @@ class BINFBX_OT_importer(bpy.types.Operator):
             file.read(struct.unpack('I', file.read(4))[0]).decode('utf-8')
 
             material = bpy.data.materials.new(MaterialName)
-            #material.use_nodes = True
+            material.use_nodes = True
+            nodes = material.node_tree.nodes
+            links = material.node_tree.links
+
+            nodes.clear()
+
+            # Add a Principled Shader node
+            node_principled = nodes.new(type='ShaderNodeBsdfPrincipled')
+            node_principled.location = 0, 0
+
+            # Add the Output node
+            node_output = nodes.new(type='ShaderNodeOutputMaterial')
+            node_output.location = 400, 0
+
+            links.new(
+                node_principled.outputs["BSDF"], node_output.inputs["Surface"])
 
             struct.unpack("6I", file.read(24))
 
             (UniformCount, ) = struct.unpack('I', file.read(4))
 
+            node_y_location = 0
             for j in range(UniformCount):
                 # Uniform Name
-                file.read(struct.unpack('I', file.read(4))[0]).decode('utf-8')
+                UniformName = file.read(struct.unpack(
+                    'I', file.read(4))[0]).decode('utf-8')
                 # Uniform Type
                 (UniformType, ) = struct.unpack("I", file.read(4))
                 if UniformType == FLOAT:
@@ -230,15 +283,60 @@ class BINFBX_OT_importer(bpy.types.Operator):
                 elif UniformType == TEXTUREMAP:
                     image_path = file.read(struct.unpack(
                         'I', file.read(4))[0]).decode('utf-8')
-                    print("Image Path", image_path)
-                    #image_path = image_path.replace("\\", os.sep)
-                    #image_path = image_path.replace("/", os.sep)
-                    #image_path = image_path.replace("runtimedata", self.runtimedata)
+                    if runtime_data_path != "":
+                        image_path = image_path.replace(
+                            "runtimedata", runtime_data_path)
+                        try:
+                            # Add the Image Texture node
+                            node_tex = nodes.new('ShaderNodeTexImage')
+                            # Assign the image
+                            image = bpy.data.images.get(
+                                os.path.basename(image_path))
+                            if image:
+                                node_tex.image = image
+                            else:
+                                node_tex.image = bpy.data.images.load(
+                                    image_path)
+                                node_tex.image.colorspace_settings.name = 'Non-Color'
+                            node_tex.location = -800, node_y_location
+                            if UniformName.find("g_sColorMap") != -1:
+                                node_tex.image.colorspace_settings.name = 'sRGB'
+                                links.new(
+                                    node_tex.outputs["Color"], node_principled.inputs["Base Color"])
+                            # Note: I could not find the difference between g_sSpecularColorMap and g_sSpecShiftMap
+                            # They may have the same use on different shaders so they are named differently.
+                            elif UniformName.find("g_sSpecularColorMap") != -1 or UniformName.find("g_sSpecShiftMap") != -1:
+                                links.new(
+                                    node_tex.outputs["Color"], node_principled.inputs["Specular"])
+                            elif UniformName.find("g_sNormalMap") != -1:
+                                node_normal = nodes.new('ShaderNodeNormalMap')
+                                node_normal.location = -400, node_y_location
+                                links.new(
+                                    node_normal.outputs["Normal"], node_principled.inputs["Normal"])
+                                links.new(
+                                    node_tex.outputs["Color"], node_normal.inputs["Color"])
+                            elif UniformName.find("g_sSmoothnessMap") != -1:
+                                node_invert = nodes.new('ShaderNodeInvert')
+                                node_invert.location = -400, node_y_location
+                                links.new(
+                                    node_invert.outputs["Color"], node_principled.inputs["Roughness"])
+                                links.new(
+                                    node_tex.outputs["Color"], node_invert.inputs["Color"])
+                            elif UniformName.find("g_sAlphaTestSampler") != -1:
+                                material.blend_method = 'BLEND'
+                                links.new(
+                                    node_tex.outputs["Alpha"], node_principled.inputs["Alpha"])
+                            node_y_location += 400
+                        except:
+                            print("Image NOT found:", image_path)
+
                 elif UniformType == TEXTURESAMPLER:
                     pass
                 elif UniformType == BOOLEAN:
                     struct.unpack("I", file.read(4))
             Materials.append(material)
+            bpy.context.window_manager.progress_update(i)
+        bpy.context.window_manager.progress_end()
 
         (MaterialMapCount, ) = struct.unpack('I', file.read(4))
         # First Material Map
