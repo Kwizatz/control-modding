@@ -1,4 +1,4 @@
-# Copyright (C) 2021, 2022 Rodrigo Jose Hernandez Cordoba
+# Copyright (C) 2021-2023 Rodrigo Jose Hernandez Cordoba
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -403,7 +403,7 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                 VertexAttribs = [[], []]
                 FormatStrings = ["", ""]
                 AttribIndex = [0, 0]
-                SemanticCount = {}
+                SemanticCount = { POSITION: 0, NORMAL: 0, TEXCOORD: 0, TANGENT: 0, INDEX: 0, WEIGHT: 0 }
                 for j in range(VertexAttribCount):
                     (BufferIndex, Type, Semantic, Zero) = struct.unpack(
                         '4B', file.read(4))
@@ -419,7 +419,6 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                     SemanticCount[Semantic] += 1
                     FormatStrings[BufferIndex] += Format[Type]
                     AttribIndex[BufferIndex] += FormatIndexCount[Type]
-
                 # Unknown
                 struct.unpack('i', file.read(4))
                 # Unknown
@@ -548,23 +547,24 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                 # Cannot directly set tangents [sadface]
                 mesh_data.calc_tangents()
 
-                armature_modifier = mesh_object.modifiers.new(
-                    'armature', 'ARMATURE')
-                armature_modifier.object = armature_object
-                armature_modifier.use_bone_envelopes = False
-                armature_modifier.use_vertex_groups = True
+                if SemanticCount[INDEX] != 0:
+                    armature_modifier = mesh_object.modifiers.new(
+                        'armature', 'ARMATURE')
+                    armature_modifier.object = armature_object
+                    armature_modifier.use_bone_envelopes = False
+                    armature_modifier.use_vertex_groups = True
 
-                for vertex in mesh_data.vertices:
-                    for j in range(SemanticCount[INDEX]):
-                        for k in range(4):
-                            # Skip 0 weights or vertices already added
-                            if Weights[j][vertex.index][k] == 0:
-                                continue
-                            if JointNames[Indices[j][vertex.index][k]] not in mesh_object.vertex_groups:
-                                mesh_object.vertex_groups.new(
-                                    name=JointNames[Indices[j][vertex.index][k]])
-                            mesh_object.vertex_groups[JointNames[Indices[j][vertex.index][k]]].add(
-                                [vertex.index], Weights[j][vertex.index][k], 'ADD')
+                    for vertex in mesh_data.vertices:
+                        for j in range(SemanticCount[INDEX]):
+                            for k in range(4):
+                                # Skip 0 weights or vertices already added
+                                if Weights[j][vertex.index][k] == 0:
+                                    continue
+                                if JointNames[Indices[j][vertex.index][k]] not in mesh_object.vertex_groups:
+                                    mesh_object.vertex_groups.new(
+                                        name=JointNames[Indices[j][vertex.index][k]])
+                                mesh_object.vertex_groups[JointNames[Indices[j][vertex.index][k]]].add(
+                                    [vertex.index], Weights[j][vertex.index][k], 'ADD')
 
                 mesh_object.data.materials.append(
                     Materials[MaterialMaps[MeshCollectionNames.index(MeshCollectionName)][i]])
