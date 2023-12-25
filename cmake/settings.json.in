@@ -1,0 +1,49 @@
+{
+    "git.path": "${GIT_EXECUTABLE}",
+    "git.ignoreLimitWarning": true,
+    "terminal.integrated.automationProfile.windows":
+    {
+        "path": "C:\\Windows\\System32\\cmd.exe"
+    },
+    "terminal.integrated.profiles.windows": {
+        "MinGW GCC Bash": {
+            "path": "${BASH_EXECUTABLE}",
+            "args": ["--login", "-i"],
+            "env":
+            {
+                "MSYSTEM": "MINGW64",
+                "CHERE_INVOKING":"1"
+            }
+        },
+        "MinGW Clang Bash": {
+            "path": "${BASH_EXECUTABLE}",
+            "args": ["--login", "-i"],
+            "env":
+            {
+                "MSYSTEM": "CLANG64",
+                "CHERE_INVOKING":"1"
+            }
+        },
+        "MinGW UCRT64 Bash": {
+            "path": "${BASH_EXECUTABLE}",
+            "args": ["--login", "-i"],
+            "env":
+            {
+                "MSYSTEM": "UCRT64",
+                "CHERE_INVOKING":"1"
+            }
+        },
+        "PowerShell":null,
+        "Command Prompt":null
+    },  
+    "python.defaultInterpreterPath": "${Python3_EXECUTABLE}",
+    "cmake.cmakePath": "${CMAKE_COMMAND}",
+    "files.associations": {
+        "*.json.in": "json",
+        "*.cap.in": "json",
+        "*.cap": "json",
+        "*.cmake": "cmake",
+        "*.cmake.in": "cmake",
+    },
+    "editor.fontFamily": "'Fira Code', Consolas, 'Courier New', monospace"
+}

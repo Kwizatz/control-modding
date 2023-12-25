@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2021,2022 Rodrigo Jose Hernandez Cordoba
+Corocessayright (C) 2021,2022 Rodrigo Jose Hernandez Cordoba
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -120,15 +120,18 @@ namespace ControlModding
                         i++;
                         mOutputFile = argv[i];
                     }
+                    else if ( strncmp ( &argv[i][2], "dump", sizeof ( "dump" ) ) == 0 )
+                    {
+                        mDump = true;
+                    }
                     else if ( strncmp ( &argv[i][2], "remove", sizeof ( "remove" ) ) == 0 )
                     {
-
                         MeshReference mesh_reference{};
                         if(i + 3 < argc)
                         {
                             errno = 0;
                             mesh_reference.mGroup = std::strtoul(argv[i + 1], nullptr, 10);
-                            if(errno!=0)
+                            if(errno != 0)
                             {
                                 std::ostringstream stream;
                                 stream << "Invalid group number, expected unsigned integer, got " << argv[i + 1] << std::endl;
@@ -136,7 +139,7 @@ namespace ControlModding
                             }
                             errno = 0;
                             mesh_reference.mLOD = std::strtoul(argv[i + 2], nullptr, 10);
-                            if(errno!=0)
+                            if(errno != 0)
                             {
                                 std::ostringstream stream;
                                 stream << "Invalid LOD, expected unsigned integer, got " << argv[i + 2] << std::endl;
@@ -153,7 +156,7 @@ namespace ControlModding
                         }
                         else
                         {
-                            throw std::runtime_error ( "Remove argument missing, expected \"remove <mesh group> <mesh index>\"" );
+                            throw std::runtime_error ( "Remove argument missing, expected \"remove <mesh group> <mesh LOD> <mesh index>\"" );
                         }
                         i+=3;
                         mRemove.push_back(mesh_reference);
@@ -174,7 +177,7 @@ namespace ControlModding
                     default:
                         {
                             std::ostringstream stream;
-                            stream << "Unknown Option" << argv[i] << std::endl;
+                            stream << "Unknown Option " << argv[i] << std::endl;
                             throw std::runtime_error(stream.str().c_str());
                         }
                     }
@@ -377,7 +380,7 @@ namespace ControlModding
         {
             binfbx.Write(mOutputFile);
         }
-        else
+        if(mDump)
         {
             binfbx.Dump();
         }

@@ -39,6 +39,11 @@ int main ( int argc, char *argv[] )
         else
         {
             std::cout << "Usage: " << argv[0] << " <tool> [-help | ...]" << std::endl;
+            std::cout << "Available tools:" << std::endl;
+            for(auto& i: ToolFactories)
+            {
+                std::cout << "  " << i.first << std::endl;
+            }
         }
         return retval;
     }

@@ -32,6 +32,7 @@ namespace ControlModding
         void ProcessArgs ( int argc, char** argv );
         std::string mInputFile;
         std::string mOutputFile;
+        bool mDump{false};
         struct MeshReference{
             uint32_t mGroup;
             uint32_t mLOD;

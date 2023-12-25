@@ -12,17 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from numpy import indices
 import bpy
 import os
 import os.path
 import struct
 import mathutils
-import operator
-import itertools
-import sys
-from multiprocessing import Pool
-from multiprocessing.dummy import Pool as ThreadPool, Lock as ThreadLock
+#from multiprocessing import Pool
+#from multiprocessing.dummy import Pool as ThreadPool, Lock as ThreadLock
 
 MAGICK = 0x2e
 
@@ -102,6 +98,8 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
 
     def execute(self, context):
         bpy.context.window.cursor_set("WAIT")
+        # Force Object Mode
+        bpy.ops.object.mode_set()
         self.filepath = bpy.path.ensure_ext(self.filepath, ".binfbx")
         # try to find runtime data path
         runtime_data_path = os.path.abspath(self.filepath)

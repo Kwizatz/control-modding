@@ -1,0 +1,69 @@
+{
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "Test Dump",
+                "type": "cppdbg",
+                "request": "launch",
+                "args": ["binfbx", "--dump", "@UNPACKED_DIR@/data/objects/characters/intermediate/jesse_civilian_publish_physx.binfbx"],
+                "stopAtEntry": false,
+                "cwd": "@CMAKE_SOURCE_DIR@",
+                "environment": [
+                    {
+                        "name":"PATH",
+                        "value":"@DEBUG_PATH@"
+                    }
+                ],
+                "externalConsole": @USE_EXTERNAL_CONSOLE@,
+                "program": "@CMAKE_BINARY_DIR@/tool/control-tool@CMAKE_EXECUTABLE_SUFFIX@",
+                "miDebuggerPath": "@GDB_EXECUTABLE@",
+                "miDebuggerArgs": "@GDB_ARGS@",
+                "MIMode": "gdb",
+                "additionalSOLibSearchPath": "C:/msys64/mingw64/bin",
+                "setupCommands": [
+                    {
+                        "description": "Enable pretty-printing for gdb",
+                        "text": "-enable-pretty-printing",
+                        "ignoreFailures": true
+                    },
+                    {
+                        "description": "Enable break on all exceptions",
+                        "text": "catch throw",
+                        "ignoreFailures": true
+                    }
+                ]
+            },
+            {
+                "name": "Test Remove",
+                "type": "cppdbg",
+                "request": "launch",
+                "args": ["binfbx", "-i", "@UNPACKED_DIR@/data/objects/characters/intermediate/jesse_civilian_publish_physx.binfbx", "-o", "jesse_civilian_publish_physx.binfbx", "--remove", "0", "0", "0"],
+                "stopAtEntry": false,
+                "cwd": "@CMAKE_SOURCE_DIR@",
+                "environment": [
+                    {
+                        "name":"PATH",
+                        "value":"@DEBUG_PATH@"
+                    }
+                ],
+                "externalConsole": @USE_EXTERNAL_CONSOLE@,
+                "program": "@CMAKE_BINARY_DIR@/tool/control-tool@CMAKE_EXECUTABLE_SUFFIX@",
+                "miDebuggerPath": "@GDB_EXECUTABLE@",
+                "miDebuggerArgs": "@GDB_ARGS@",
+                "MIMode": "gdb",
+                "additionalSOLibSearchPath": "C:/msys64/mingw64/bin",
+                "setupCommands": [
+                    {
+                        "description": "Enable pretty-printing for gdb",
+                        "text": "-enable-pretty-printing",
+                        "ignoreFailures": true
+                    },
+                    {
+                        "description": "Enable break on all exceptions",
+                        "text": "catch throw",
+                        "ignoreFailures": true
+                    }
+                ]
+            }
+        ]
+    }

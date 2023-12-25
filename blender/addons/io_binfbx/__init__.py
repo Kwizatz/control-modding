@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from . import importer
+from . import exporter
 import bpy
 bl_info = {
     "name": "Remedy's Control Mesh Format (.binfbx)",
@@ -31,16 +32,27 @@ def binfbx_import_menu_func(self, context):
     self.layout.operator(
         importer.IMPORT_OT_binfbx.bl_idname,
         text="BinFBX (.binfbx)")
+    
+def binfbx_export_menu_func(self, context):
+    self.layout.operator(
+        exporter.EXPORT_OT_binfbx.bl_idname,
+        text="BinFBX (.binfbx)")
 
 
 def register():
     bpy.utils.register_class(importer.IMPORT_OT_binfbx)
     bpy.types.TOPBAR_MT_file_import.append(binfbx_import_menu_func)
 
+    bpy.utils.register_class(exporter.EXPORT_OT_binfbx)
+    bpy.types.TOPBAR_MT_file_export.append(binfbx_export_menu_func)
+
 
 def unregister():
     bpy.utils.unregister_class(importer.IMPORT_OT_binfbx)
     bpy.types.TOPBAR_MT_file_import.remove(binfbx_import_menu_func)
+
+    bpy.utils.unregister_class(exporter.EXPORT_OT_binfbx)
+    bpy.types.TOPBAR_MT_file_export.remove(binfbx_export_menu_func)
 
 
 if __name__ == "__main__":
