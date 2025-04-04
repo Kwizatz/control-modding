@@ -15,7 +15,7 @@ The binfbx files can be extracted with [control-unpack](https://github.com/profM
 
 # Remedy's binfbx file format specification.
 
-This document tries to describe the binary structure of Remedy's Control video game 3d mesh format with extension .binfbx.
+This section tries to describe the binary structure of Remedy's Control video game 3d mesh format with extension .binfbx.
 
 This research is based on the previous on a Blender imported work by user 'volfin' at xentax forums:
 https://forum.xentax.com/viewtopic.php?f=33&t=21047&start=45#p156665
@@ -120,3 +120,44 @@ Note: TextureSampler contains no data, likely because you need to generate a tex
 ## To Be Continued
 
 Here is where things really confusing and hackish in the importer, it's not that the info is not there, but rather that the way it is layed out is confusing and variable names don't make entire sense. I will try to reorder it better and see if that way I can get some clues on what is what.
+
+# Remedy's binskeleton file format specification.
+
+This section describes the binary structure of Remedy's Control video game skeleton format with extension .binskeleton.
+
+This research is entirelly original based on reverse engineering with the help of IDA Free 9.0 as well as Ghidra.
+
+## File Structure
+
+Field names are not in any way official and were selected to best represent the information they contain.
+
+## General arrangement
+
+| Type       |  Name                    |  Comment                                                                                                                                                                           |
+|------------|:------------------------:|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| uint128_t  | Magick                   | Always 0x2. The format uses 128 bit alignment and there is no code check for the Magick number, so it is really unknown whether this is an 8,16,64 or 128 bit number plus padding. |
+| uint32_t   | Offset to section start  | Number of bytes after the first 16 bytes of the Magick to the start of the first data section (in practice number of bytes from the address of this field)                         |
+| uint32_t   | Size of section in bytes | Size in bytes of the first section of data, this is padded to 128 bits for the next section start.                                                                                 |
+| uint32_t   | Subsection count         | Usually 3 (bone transform array, bone parent array, bone id array).                                                                                                                |
+| uint32_t[] | Subsection Offset Array  | Subsection count entries representing offsets from the start of the section to the location of another set of offsets to the subsections but 64 bit this time.                     |
+| Padding    | 128 bit 0 padding        | Zero padding to align data to 128 bits.                                                                                                                                            |
+| uint64_t   | Bone Count               | This is where the first offset points to and contains the total number of bones to be used to extract the data from the subsections.                                               |
+| uint64_t[] | Subsection Offset Array  | 64 bit offset array from the start of the section to the start of each subsection, the previous 32 bit offsets point to these which are converted into 64 bit pointers at runtime. |
+| float[8]   | Bone Transform Array     | Bone count array of 8 floats representing bone transforms. First subsection offset points here.                                                                                    |
+| uint32_t   | Bone Parent Array        | Bone count array of parent indices. Second subsection offset points here.                                                                                                          |
+| Padding    | 128 bit 0 padding        | Zero padding to align data to 128 bits.                                                                                                                                            |
+| uint32_t   | Bone Id Array            | Bone count array of bone ids. Each id is calculated as the 32 bit FNV1a hash value of its name. Third subsection offset points here.                                               |
+| Padding    | 128 bit 0 padding        | Zero padding to align data to 128 bits.                                                                                                                                            |
+| uint32_t   | Offset to section start  | This second main section contains bone names (in practice number of bytes from the address of this field).                                                                         |
+| uint32_t   | Size of section in bytes | Size in bytes of the first section of data, this is padded to 128 bits for the next section start.                                                                                 |
+| uint32_t   | Subsection count         | 1 + bone count. The first subsection offset points to a struct consisting of an offset to an array of offsets to strings and the string count.                                     |
+| uint32_t[] | Subsection Offset Array  | Subsection count entries representing offsets for the start of the 64bit string offsets and string offset count plus as many 32 bit offsets to 64 bit offsets to each string.      |
+| Padding    | 128 bit 0 padding        | Zero padding to align data to 128 bits.                                                                                                                                            |
+| uint64_t[2]| Offset start + count     | 2 64 bit values representing the offset to the final array of offsets and the offset count. The last Offset to section start points here.                                          |
+| uint64_t[] | 64 bit offset Array      | 64 bit offsets to each of the string names of each bone, also counting from the last Offset to section start                                                                       |
+| char[]     | Bone names as strings    | Zero terminated strings representing the names of the bones. No lenght is stored, the previous offsets just point to the start of the string and its end is marked by a zero.      |
+
+## Related Resources
+
+[Control Unpack](https://github.com/profMagija/control-unpack)
+[Loose Files Loader](https://www.nexusmods.com/control/mods/11)

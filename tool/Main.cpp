@@ -22,12 +22,14 @@ limitations under the License.
 #include <cstdint>
 #include "Tool.h"
 #include "MeshTool.h"
+#include "SkeletonTool.h"
 
 int main ( int argc, char *argv[] )
 {
     std::unordered_map<std::string, std::function<std::unique_ptr<ControlModding::Tool>() > > ToolFactories
     {
         { "binfbx", [] { return std::make_unique<ControlModding::MeshTool>(); } },
+        { "binskeleton", [] { return std::make_unique<ControlModding::SkeletonTool>(); } },
     };
     try
     {

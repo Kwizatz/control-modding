@@ -34,6 +34,38 @@
                 ]
             },
             {
+                "name": "Test Skeleton",
+                "type": "cppdbg",
+                "request": "launch",
+                "args": ["binskeleton", "--dump", "@UNPACKED_DIR@/data/objects/hardcoded/helpers_missingmesh.binskeleton"],
+                "stopAtEntry": false,
+                "cwd": "@CMAKE_SOURCE_DIR@",
+                "environment": [
+                    {
+                        "name":"PATH",
+                        "value":"@DEBUG_PATH@"
+                    }
+                ],
+                "externalConsole": @USE_EXTERNAL_CONSOLE@,
+                "program": "@CMAKE_BINARY_DIR@/tool/control-tool@CMAKE_EXECUTABLE_SUFFIX@",
+                "miDebuggerPath": "@GDB_EXECUTABLE@",
+                "miDebuggerArgs": "@GDB_ARGS@",
+                "MIMode": "gdb",
+                "additionalSOLibSearchPath": "C:/msys64/mingw64/bin",
+                "setupCommands": [
+                    {
+                        "description": "Enable pretty-printing for gdb",
+                        "text": "-enable-pretty-printing",
+                        "ignoreFailures": true
+                    },
+                    {
+                        "description": "Enable break on all exceptions",
+                        "text": "catch throw",
+                        "ignoreFailures": true
+                    }
+                ]
+            },
+            {
                 "name": "Test Remove",
                 "type": "cppdbg",
                 "request": "launch",

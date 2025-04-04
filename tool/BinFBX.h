@@ -24,6 +24,7 @@ limitations under the License.
 #include <string_view>
 #include <variant>
 #include <tuple>
+#include <unordered_map>
 
 namespace ControlModding
 {
@@ -38,13 +39,25 @@ namespace ControlModding
         Boolean = 0x0C,
     };
     enum AttributeType : uint8_t {
-        R32G32B32_FLOAT   = 0x2,
-        B8G8R8A8_UNORM    = 0x4,
-        R8G8B8A8_UINT     = 0x5,
-        R16G16_SINT       = 0x7,
-        R16G16B16A16_SINT = 0x8,
-        R16G16B16A16_UINT = 0xd,
+        FLOAT3       = 0x2,  // POSITION
+        BYTE4_SNORM  = 0x4,  // TANGENT ?
+        BYTE4_UNORM  =  0x5, // BONE_WEIGHT
+        SHORT2_SNORM = 0x7,  // TEXCOORD
+        SHORT4_SNORM = 0x8,  // NORMAL
+        SHORT4_UINT  = 0xd,  // BONE_INDEX
+        BYTE4_UINT   = 0xf,  // BONE_INDEX
     };
+
+    const std::unordered_map<AttributeType, std::string> AttributeTypeNames = {
+        {AttributeType::FLOAT3, "FLOAT3"},
+        {AttributeType::BYTE4_SNORM, "BYTE4_SNORM"},
+        {AttributeType::BYTE4_UNORM, "BYTE4_UNORM"},
+        {AttributeType::SHORT2_SNORM, "SHORT2_SNORM"},
+        {AttributeType::SHORT4_SNORM, "SHORT4_SNORM"},
+        {AttributeType::SHORT4_UINT, "SHORT4_UINT"},
+        {AttributeType::BYTE4_UINT, "BYTE4_UINT"}
+    };
+
     struct Header{
         uint32_t Magick;
         uint32_t VertexBufferSizes[2];

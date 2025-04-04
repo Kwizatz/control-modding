@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2023 Rodrigo Jose Hernandez Cordoba
+# Copyright (C) 2021-2023,2025 Rodrigo Jose Hernandez Cordoba
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,27 +16,28 @@ from . import importer
 from . import exporter
 import bpy
 bl_info = {
-    "name": "Remedy's Control Mesh Format (.binfbx)",
+    "name": "Remedy's Control Mesh and Skeleton Format (.binfbx,.binskeleton)",
     "author": "Rodrigo Hernandez",
-    "version": (0, 0, 3),
-    "blender": (2, 80, 0),
+    "version": (0, 0, 5),
+    "blender": (4, 4, 0),
     "location": "File > Import/Export > Control BinFBX",
     "description": "BinFBX importing and exporting",
     "warning": "",
     "wiki_url": "",
     "tracker_url": "",
-    "category": "Import-Export"}
+    "category": "Import-Export"
+}
 
 
 def binfbx_import_menu_func(self, context):
     self.layout.operator(
         importer.IMPORT_OT_binfbx.bl_idname,
-        text="BinFBX (.binfbx)")
+        text="Control Mesh or Skeleton (.binfbx,.binskeleton)")
     
 def binfbx_export_menu_func(self, context):
     self.layout.operator(
         exporter.EXPORT_OT_binfbx.bl_idname,
-        text="BinFBX (.binfbx)")
+        text="Control Mesh or Skeleton (.binfbx,.binskeleton)")
 
 
 def register():

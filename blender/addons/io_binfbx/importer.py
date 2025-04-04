@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2023 Rodrigo Jose Hernandez Cordoba
+# Copyright (C) 2021-2025 Rodrigo Jose Hernandez Cordoba
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,7 +20,8 @@ import mathutils
 #from multiprocessing import Pool
 #from multiprocessing.dummy import Pool as ThreadPool, Lock as ThreadLock
 
-MAGICK = 0x2e
+FBXMAGICK = 0x2e
+SKELETONMAGICK = 0x2
 
 FLOAT = 0x00
 RANGE = 0x01
@@ -30,36 +31,51 @@ TEXTUREMAP = 0x09
 TEXTURESAMPLER = 0x08
 BOOLEAN = 0x0C
 
+# Semantics
 POSITION = 0x0
 NORMAL = 0x1
 TEXCOORD = 0x2
 TANGENT = 0x3
-INDEX = 0x5
-WEIGHT = 0x6
+BONE_INDEX = 0x5
+BONE_WEIGHT = 0x6
 
-R32G32B32_FLOAT = 0x2
-B8G8R8A8_UNORM = 0x4
-R8G8B8A8_UINT = 0x5
-R16G16_SINT = 0x7
-R16G16B16A16_SINT = 0x8
-R16G16B16A16_UINT = 0xd
+# Vertex Formats
+# Some Vertex Formats seem to match the DXGI formats at
+# https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/dxgi-formats
+# But not all of them, some others match NVIDIA APEX framework formats in the SDK at
+# APEXSDK-1.3.2-Build6-CL18960576-PhysX_3.3.2-WIN-VC10-BIN\framework\public\NxApexRenderDataFormat.h
+# and yet some others are just custom formats or match something else entirely
+# Since there is no correlation between the formats and the vertex buffer they are used in,
+# and that the APEX formats are Unsigned but then threated as Signed, we should conclude that
+# these formats are just custom formats used by the game engine and not DXGI or APEX formats,
+# just a coincidence that they match some of them in byte size.
+
+FLOAT3 = 2       # POSITION
+BYTE4_SNORM = 4  # TANGENT ?
+BYTE4_UNORM =  5 # BONE_WEIGHT
+SHORT2_SNORM = 7 # TEXCOORD
+SHORT4_SNORM = 8 # NORMAL
+SHORT4_UINT = 13 # BONE_INDEX
+BYTE4_UINT  = 15 # BONE_INDEX
 
 Format = {
-    R32G32B32_FLOAT: '3f',
-    B8G8R8A8_UNORM: '4B',
-    R8G8B8A8_UINT: '4B',
-    R16G16_SINT: '2h',
-    R16G16B16A16_SINT: '4h',
-    R16G16B16A16_UINT: '4h'
+    FLOAT3: '3f',
+    BYTE4_SNORM: '4b',
+    BYTE4_UNORM: '4B',
+    SHORT2_SNORM: '2h',
+    SHORT4_SNORM: '4h',
+    SHORT4_UINT: '4H',
+    BYTE4_UINT:  '4B',
 }
 
 FormatIndexCount = {
-    R32G32B32_FLOAT: 3,
-    B8G8R8A8_UNORM: 4,
-    R8G8B8A8_UINT: 4,
-    R16G16_SINT: 2,
-    R16G16B16A16_SINT: 4,
-    R16G16B16A16_UINT: 4
+    FLOAT3: 3,
+    BYTE4_SNORM: 4,
+    BYTE4_UNORM: 4,
+    SHORT2_SNORM: 2,
+    SHORT4_SNORM: 4,
+    SHORT4_UINT: 4,
+    BYTE4_UINT:  4,
 }
 
 # This is just for testing and debugging
@@ -82,13 +98,12 @@ def Vector3IsClose(v1, v2):
 
 
 class IMPORT_OT_binfbx(bpy.types.Operator):
-    '''Imports a binfbx file'''
+    '''Imports a binfbx or binskeleton file'''
     bl_idname = "import.binfbx"
-    bl_label = "Import BinFBX"
-
+    bl_label = "Import"
     filepath: bpy.props.StringProperty(name="BinFBX", subtype='FILE_PATH')
     filter_glob: bpy.props.StringProperty(
-        default="*.binfbx",
+        default="*.binfbx;*.binskeleton",
         options={'HIDDEN'},
     )
 
@@ -99,7 +114,98 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
     def execute(self, context):
         bpy.context.window.cursor_set("WAIT")
         # Force Object Mode
-        bpy.ops.object.mode_set()
+        # bpy.ops.object.mode_set()
+        (name, ext) = os.path.splitext(self.filepath)
+        if ext == ".binskeleton":
+            print("Importing Skeleton")
+            # Import Skeleton
+            return self.import_binskeleton()
+        elif ext == ".binfbx":
+            # Import Mesh (Includes implicit skeleton)
+            print("Importing Mesh")
+            return self.import_binfbx()
+        else:
+            self.report({'ERROR'}, "Invalid file extension")
+            return {'CANCELLED'}
+
+    def import_binskeleton(self):
+        self.filepath = bpy.path.ensure_ext(self.filepath, ".binskeleton")        
+        file = open(self.filepath, "rb")
+        # Read the whole file
+        file_data = file.read()
+        file.close()
+        # Check Magick        
+        pointer = 0
+        Magick = struct.unpack("I", file_data[pointer:pointer+4])
+
+        if Magick[0] != SKELETONMAGICK:
+            self.report({'ERROR'}, "Invalid BinSkeleton file")
+            return {'CANCELLED'}
+
+        pointer += 0x10
+        bone_data_start, bone_data_size, bone_data_subsection_count = struct.unpack("III", file_data[pointer:pointer+12])
+        bone_data_offset = pointer
+        bone_names_offset = pointer + (bone_data_start + bone_data_size) + ((bone_data_start + bone_data_size) % 0x10)
+        pointer += 0x0C
+        bone_count = struct.unpack("Q", file_data[(bone_data_offset + bone_data_start):(bone_data_offset + bone_data_start)+8])[0]        
+        transform_offset = 0
+        parents_offset   = 0
+        for i in range(bone_data_subsection_count):
+            offset = struct.unpack("I", file_data[pointer+(i*4):pointer+(i*4)+4])[0]
+            if i == 0:
+                transform_offset = bone_data_offset + bone_data_start + struct.unpack("Q",file_data[(bone_data_offset + bone_data_start + offset):(bone_data_offset + bone_data_start + offset)+8])[0]
+            elif i == 1:
+                parents_offset = bone_data_offset + bone_data_start + struct.unpack("Q",file_data[(bone_data_offset + bone_data_start + offset):(bone_data_offset + bone_data_start + offset)+8])[0]
+            # We could parse the bone ids here, but we don't need them for importing since any changes to the bone names will change the bone ids
+
+        bone_names_start, bone_names_size, bone_names_subsection_count = struct.unpack("III", file_data[bone_names_offset:bone_names_offset+12])
+
+        pointer = bone_names_offset + 0x0C
+        name_offsets = []
+        for i in range(bone_names_subsection_count):
+            offset = struct.unpack("I", file_data[pointer+(i*4):pointer+(i*4)+4])[0]
+            if i != 0: # We don't need the first subsection since it is redundant
+                name_offsets.append(bone_names_offset + bone_names_start + struct.unpack("Q",file_data[(bone_names_offset + bone_names_start + offset):(bone_names_offset + bone_names_start + offset)+8])[0])
+        bones = []
+        assert(len(name_offsets) == bone_count)
+        for i in range(bone_count):
+            transform = struct.unpack("8f", file_data[transform_offset + (i*4*8):transform_offset + (i*4*8)+4*8])
+            bones.append(
+                {
+                    "parent": struct.unpack("i", file_data[parents_offset + (i*4):parents_offset + (i*4)+4])[0],
+                    "rotation": mathutils.Quaternion((transform[3], transform[0], transform[1], transform[2])),
+                    "location": mathutils.Vector((transform[4], transform[5], transform[6])),
+                    "name": file_data[name_offsets[i]:].split(b'\0')[0].decode('utf-8')
+                })
+
+        armature_data = bpy.data.armatures.new("armature")
+        armature_object = bpy.data.objects.new("skeleton", armature_data)
+
+        bpy.context.collection.objects.link(armature_object)
+
+        bpy.ops.object.select_all(action='DESELECT')
+        bpy.context.view_layer.objects.active = armature_object
+
+        # Creating Joints
+        bpy.ops.object.mode_set(mode='EDIT')
+
+        for bone in bones:
+            joint = armature_data.edit_bones.new(bone["name"])
+            parent_matrix = mathutils.Matrix.Identity(4)
+            if bone["parent"] >= 0:
+                joint.parent = armature_data.edit_bones[bones[bone["parent"]]["name"]]
+                parent_matrix = armature_data.edit_bones[bones[bone["parent"]]["name"]].matrix
+
+            joint.length = 0.01
+            joint.matrix = parent_matrix @ mathutils.Matrix.LocRotScale(bone["location"], bone["rotation"], (1, 1, 1))
+        
+        for joint in armature_data.edit_bones:
+            joint.matrix = right_hand_matrix @ joint.matrix
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.context.window.cursor_set("DEFAULT")
+        return {'FINISHED'}
+        
+    def import_binfbx(self):
         self.filepath = bpy.path.ensure_ext(self.filepath, ".binfbx")
         # try to find runtime data path
         runtime_data_path = os.path.abspath(self.filepath)
@@ -115,7 +221,7 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
         file = open(self.filepath, "rb")
         # Read Magick
         Magick = struct.unpack("I", file.read(4))
-        if Magick[0] != MAGICK:
+        if Magick[0] != FBXMAGICK:
             self.report({'ERROR'}, "Invalid BinFBX file")
             return {'CANCELLED'}
 
@@ -401,7 +507,7 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                 VertexAttribs = [[], []]
                 FormatStrings = ["", ""]
                 AttribIndex = [0, 0]
-                SemanticCount = { POSITION: 0, NORMAL: 0, TEXCOORD: 0, TANGENT: 0, INDEX: 0, WEIGHT: 0 }
+                SemanticCount = { POSITION: 0, NORMAL: 0, TEXCOORD: 0, TANGENT: 0, BONE_INDEX: 0, BONE_WEIGHT: 0 }
                 for j in range(VertexAttribCount):
                     (BufferIndex, Type, Semantic, Zero) = struct.unpack(
                         '4B', file.read(4))
@@ -412,11 +518,16 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                         BufferIndex = 0
                     if Semantic not in SemanticCount:
                         SemanticCount[Semantic] = 0
+                    print(BufferIndex, Type, Semantic, Zero)
                     VertexAttribs[BufferIndex].append({"Type": Type, "Semantic": Semantic, "SemanticIndex": SemanticCount[Semantic],
                                                       "Index": AttribIndex[BufferIndex], "IndexCount": FormatIndexCount[Type]})
                     SemanticCount[Semantic] += 1
                     FormatStrings[BufferIndex] += Format[Type]
                     AttribIndex[BufferIndex] += FormatIndexCount[Type]
+                print(VertexAttribs)
+                print(FormatStrings)
+                print(struct.calcsize(FormatStrings[0]))
+                print(struct.calcsize(FormatStrings[1]))
                 # Unknown
                 struct.unpack('i', file.read(4))
                 # Unknown
@@ -438,49 +549,49 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                         MeshData["UVs"].append([])
                     for j in range(SemanticCount[TANGENT]):
                         MeshData["Tangents"].append([])
-                    for j in range(SemanticCount[INDEX]):
+                    for j in range(SemanticCount[BONE_INDEX]):
                         MeshData["Indices"].append([])
-                    for j in range(SemanticCount[WEIGHT]):
+                    for j in range(SemanticCount[BONE_WEIGHT]):
                         MeshData["Weights"].append([])
                     for j in range(2):
                         for vertex in struct.iter_unpack(FormatStrings[j], VertexBuffers[j][VertexOffsets[j]:VertexOffsets[j] + (VertexCount*struct.calcsize(FormatStrings[j]))]):
                             for attrib in VertexAttribs[j]:
                                 if attrib["Semantic"] == POSITION:
                                     # Position is always 3 floats
-                                    assert attrib["Type"] == R32G32B32_FLOAT
+                                    assert attrib["Type"] == FLOAT3
                                     # There should only be one position semantic
                                     assert attrib["SemanticIndex"] == 0
                                     MeshData["Positions"].append(right_hand_matrix @ mathutils.Vector(
                                         (vertex[attrib["Index"]], vertex[attrib["Index"] + 1], vertex[attrib["Index"] + 2])))
+                                    print(vertex[attrib["Index"]], vertex[attrib["Index"] + 1], vertex[attrib["Index"] + 2])
 
                                 elif attrib["Semantic"] == NORMAL:
-                                    # We're only supporting R16G16B16A16_SINT normals for now
-                                    assert attrib["Type"] == R16G16B16A16_SINT
+                                    # We're only supporting SHORT4_SNORM normals for now
+                                    assert attrib["Type"] == SHORT4_SNORM
                                     MeshData["Normals"][attrib["SemanticIndex"]].append(right_hand_matrix @ mathutils.Vector(
                                         (vertex[attrib["Index"]]/32767.0, vertex[attrib["Index"] + 1]/32767.0, vertex[attrib["Index"] + 2]/32767.0)))
 
                                 elif attrib["Semantic"] == TEXCOORD:
-                                    # We're only supporting R16G16_SINT texcoords for now
-                                    assert attrib["Type"] == R16G16_SINT
+                                    # We're only supporting SHORT2_SNORM texcoords for now
+                                    assert attrib["Type"] == SHORT2_SNORM
                                     MeshData["UVs"][attrib["SemanticIndex"]].append(
                                         (vertex[attrib["Index"]]/4095.0, 1.0-(vertex[attrib["Index"] + 1]/4095.0)))
 
                                 elif attrib["Semantic"] == TANGENT:
                                     # This can be commented out as tangents cannot be directly set in Blender
-                                    # We're only supporting B8G8R8A8_UNORM tangents for now
-                                    assert attrib["Type"] == B8G8R8A8_UNORM
+                                    # We're only supporting BYTE4_SNORM tangents for now
+                                    assert attrib["Type"] == BYTE4_SNORM
                                     MeshData["Tangents"][attrib["SemanticIndex"]].append(
                                         (vertex[attrib["Index"]]/255.0, vertex[attrib["Index"] + 1]/255.0, vertex[attrib["Index"] + 2]/255.0, vertex[attrib["Index"] + 3]/255.0))
 
-                                elif attrib["Semantic"] == INDEX:
-                                    # We're only supporting R16G16B16A16_UINT indices for now
-                                    assert attrib["Type"] == R16G16B16A16_UINT
+                                elif attrib["Semantic"] == BONE_INDEX:                                    
+                                    # We're only supporting SHORT4_UINT or BYTE4_UINT indices for now
+                                    assert attrib["Type"] == SHORT4_UINT or attrib["Type"] == BYTE4_UINT
                                     MeshData["Indices"][attrib["SemanticIndex"]].append(
                                         (vertex[attrib["Index"]], vertex[attrib["Index"] + 1], vertex[attrib["Index"] + 2], vertex[attrib["Index"] + 3]))
-
-                                elif attrib["Semantic"] == WEIGHT:
-                                    # We're only supporting R8G8B8A8_UINT weights for now
-                                    assert attrib["Type"] == R8G8B8A8_UINT
+                                elif attrib["Semantic"] == BONE_WEIGHT:
+                                    # We're only supporting BYTE4_UNORM weights for now
+                                    assert attrib["Type"] == BYTE4_UNORM
                                     MeshData["Weights"][attrib["SemanticIndex"]].append(
                                         (vertex[attrib["Index"]]/255.0, vertex[attrib["Index"] + 1]/255.0, vertex[attrib["Index"] + 2]/255.0, vertex[attrib["Index"] + 3]/255.0))
                     Meshes[(VertexCount, VertexOffsets[0],
@@ -502,9 +613,9 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                     UVs.append([])
                 for j in range(SemanticCount[TANGENT]):
                     Tangents.append([])
-                for j in range(SemanticCount[INDEX]):
+                for j in range(SemanticCount[BONE_INDEX]):
                     Indices.append([])
-                for j in range(SemanticCount[WEIGHT]):
+                for j in range(SemanticCount[BONE_WEIGHT]):
                     Weights.append([])
 
                 for triangle in struct.iter_unpack(IndexFormat, IndexBuffer[IndexOffset*IndexSize:(IndexOffset*IndexSize)+(FaceCount*3*IndexSize)]):
@@ -521,17 +632,18 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                             for j in range(SemanticCount[TANGENT]):
                                 Tangents[j].append(
                                     MeshData["Tangents"][j][index])
-                            for j in range(SemanticCount[INDEX]):
+                            for j in range(SemanticCount[BONE_INDEX]):
                                 Indices[j].append(
                                     MeshData["Indices"][j][index])
-                            for j in range(SemanticCount[WEIGHT]):
+                            for j in range(SemanticCount[BONE_WEIGHT]):
                                 Weights[j].append(
                                     MeshData["Weights"][j][index])
                         face.insert(0, VertexMap[index])
                     Faces.append(face)
 
                 mesh_data.from_pydata(Positions, [], Faces)
-                mesh_data.use_auto_smooth = True
+                if (4, 1, 0) > bpy.app.version:
+                    mesh_data.use_auto_smooth = True
 
                 for j in range(SemanticCount[NORMAL]):
                     mesh_data.normals_split_custom_set_from_vertices(
@@ -545,7 +657,7 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                 # Cannot directly set tangents [sadface]
                 mesh_data.calc_tangents()
 
-                if SemanticCount[INDEX] != 0:
+                if SemanticCount[BONE_INDEX] != 0:
                     armature_modifier = mesh_object.modifiers.new(
                         'armature', 'ARMATURE')
                     armature_modifier.object = armature_object
@@ -553,16 +665,17 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                     armature_modifier.use_vertex_groups = True
 
                     for vertex in mesh_data.vertices:
-                        for j in range(SemanticCount[INDEX]):
+                        for j in range(SemanticCount[BONE_INDEX]):
                             for k in range(4):
                                 # Skip 0 weights or vertices already added
-                                if Weights[j][vertex.index][k] == 0:
+                                if len(Weights) > 0 and Weights[j][vertex.index][k] == 0:
                                     continue
                                 if JointNames[Indices[j][vertex.index][k]] not in mesh_object.vertex_groups:
                                     mesh_object.vertex_groups.new(
                                         name=JointNames[Indices[j][vertex.index][k]])
+                                weight = Weights[j][vertex.index][k] if len(Weights) > 0 else 1.0
                                 mesh_object.vertex_groups[JointNames[Indices[j][vertex.index][k]]].add(
-                                    [vertex.index], Weights[j][vertex.index][k], 'ADD')
+                                    [vertex.index], weight, 'ADD')
 
                 mesh_object.data.materials.append(
                     Materials[MaterialMaps[MeshCollectionNames.index(MeshCollectionName)][i]])

@@ -1,5 +1,5 @@
 /*
-Corocessayright (C) 2021,2022 Rodrigo Jose Hernandez Cordoba
+Corocessayright (C) 2021,2022,2025 Rodrigo Jose Hernandez Cordoba
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -43,27 +43,13 @@ namespace ControlModding
     std::ostream& operator<<(std::ostream& os, const AttributeInfo& aAttributeInfo){
         os << "\nBufferLocation " << static_cast<uint32_t>(aAttributeInfo.Index) << "\nType ";
 
-        switch(aAttributeInfo.Type)
+        auto attribute_name {AttributeTypeNames.find(aAttributeInfo.Type)};
+        if(attribute_name != AttributeTypeNames.end())
         {
-        case 0x2:
-            os << "R32G32B32_FLOAT";
-            break;
-        case 0x4:
-            os << "B8G8R8A8_UNORM";
-            break;
-        case 0x7:
-         os << "R16G16_SINT";
-         break;
-        case 0x8:
-         os << "R16G16B16A16_SINT";
-         break;
-        case 0xd:
-         os << "R16G16B16A16_UINT";
-         break;
-        case 0x5:
-         os << "R8G8B8A8_UINT";
-         break;
-        default:
+            os << attribute_name->second;
+        }
+        else
+        {
             os << "Unknown ("<< static_cast<uint32_t>(aAttributeInfo.Type) <<")";
         }
 

@@ -319,16 +319,16 @@ namespace ControlModding
         {
             switch(i.Type)
             {
-            case AttributeType::R32G32B32_FLOAT:
+            case AttributeType::FLOAT3:
                 *((i.Index) ? &std::get<0>(result) : &std::get<1>(result)) += 12;
             break;
-                case AttributeType::B8G8R8A8_UNORM:
-                case AttributeType::R8G8B8A8_UINT:
-                case AttributeType::R16G16_SINT:
+                case AttributeType::BYTE4_SNORM:
+                case AttributeType::BYTE4_UINT:
+                case AttributeType::SHORT2_SNORM:
                 *((i.Index) ? &std::get<0>(result) : &std::get<1>(result)) += 4;
             break;
-                case AttributeType::R16G16B16A16_SINT:
-                case AttributeType::R16G16B16A16_UINT:
+                case AttributeType::SHORT4_SNORM:
+                case AttributeType::SHORT4_UINT:
                 *((i.Index) ? &std::get<0>(result) : &std::get<1>(result)) += 8;
             break;
             }
