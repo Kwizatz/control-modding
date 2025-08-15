@@ -106,6 +106,8 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
         default="*.binfbx;*.binskeleton",
         options={'HIDDEN'},
     )
+    # Optional: verbose debug logging of parsed fields (global params and per-mesh bounds/flags)
+    debug: bpy.props.BoolProperty(name="Debug logs", default=False)
 
     @classmethod
     def poll(cls, context):
@@ -313,21 +315,32 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
             bpy.ops.object.mode_set(mode='OBJECT')
             assert(len(armature_data.bones) == JointCount)
 
-        # Skip Unknown Data
-        struct.unpack("II", file.read(8))
-        struct.unpack("f", file.read(4))
-        (count, ) = struct.unpack("I", file.read(4))
-        for i in range(count):
-            struct.unpack("f", file.read(4))
+        # Global params block (after joints)
+        (Reserved0, Reserved1) = struct.unpack("ii", file.read(8))
+        (GlobalScale, ) = struct.unpack("f", file.read(4))
+        (LODThresholdCount, ) = struct.unpack("I", file.read(4))
+        LODThresholds = ()
+        if LODThresholdCount > 0:
+            LODThresholds = struct.unpack(str(LODThresholdCount) + 'f', file.read(LODThresholdCount * 4))
 
-        struct.unpack("f", file.read(4))
-        struct.unpack("fff", file.read(12))
-        struct.unpack("f", file.read(4))
-        struct.unpack("fff", file.read(12))
-        struct.unpack("fff", file.read(12))
+        (MirrorSign, ) = struct.unpack("f", file.read(4))
+        AABBCenter = struct.unpack("fff", file.read(12))
+        (BoundingSphereRadius, ) = struct.unpack("f", file.read(4))
+        AABBMin = struct.unpack("fff", file.read(12))
+        AABBMax = struct.unpack("fff", file.read(12))
 
-        # LOD Count
-        struct.unpack("I", file.read(4))
+        # Global LOD count (number of LOD levels present)
+        (GlobalLODCount, ) = struct.unpack("I", file.read(4))
+
+        if self.debug:
+            print("GlobalParams:")
+            print("  Reserved:", Reserved0, Reserved1)
+            print("  GlobalScale:", GlobalScale)
+            print("  LODThresholdCount:", LODThresholdCount, "Thresholds:", LODThresholds)
+            print("  MirrorSign:", MirrorSign)
+            print("  AABBCenter:", AABBCenter, "SphereRadius:", BoundingSphereRadius)
+            print("  AABBMin:", AABBMin, "AABBMax:", AABBMax)
+            print("  GlobalLODCount:", GlobalLODCount)
 
         # Read Materials
         Materials = []
@@ -438,6 +451,9 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                     pass
                 elif UniformType == BOOLEAN:
                     struct.unpack("I", file.read(4))
+                elif UniformType == 0x10:
+                    # Unknown uniform type observed in some assets; appears to carry no payload
+                    pass
             Materials.append(material)
             bpy.context.window_manager.progress_update(i)
         bpy.context.window_manager.progress_end()
@@ -493,15 +509,32 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                 bpy.ops.object.select_all(action='DESELECT')
                 bpy.context.view_layer.objects.active = mesh_object
 
-                # Unknown
-                struct.unpack('i', file.read(4))
-                # Bounding Sphere
-                struct.unpack('4i', file.read(4*4))
-                # Bounding Box
-                struct.unpack('6i', file.read(6*4))
+                # Per-mesh flags and bounds
+                # Flags0 (bitfield)
+                (MeshFlags0,) = struct.unpack('i', file.read(4))
+                # Bounding Sphere as 4x float32: (center.x, center.y, center.z, radius)
+                MeshBoundingSphere = struct.unpack('4f', file.read(4*4))
+                # Bounding Box as 6x float32: (min.x, min.y, min.z, max.x, max.y, max.z)
+                MeshBoundingBox = struct.unpack('6f', file.read(6*4))
 
-                # Unknown
-                struct.unpack('i', file.read(4))
+                # Flags1 (bitfield)
+                (MeshFlags1,) = struct.unpack('i', file.read(4))
+
+                if self.debug:
+                    print(
+                        f"MeshParams group={MeshCollectionName} LOD={LOD} idx={LODMeshIndex-1} "
+                        f"flags0=0x{MeshFlags0:08X} flags1=0x{MeshFlags1:08X} "
+                        f"sphere={MeshBoundingSphere} box={MeshBoundingBox}"
+                    )
+                    cx, cy, cz, rr = MeshBoundingSphere
+                    minx, miny, minz, maxx, maxy, maxz = MeshBoundingBox
+                    ex, ey, ez = abs(maxx - minx), abs(maxy - miny), abs(maxz - minz)
+                    print(
+                        f"  sphere=(cx={cx:.6f}, cy={cy:.6f}, cz={cz:.6f}, r={rr:.6f})"
+                    )
+                    print(
+                        f"  box=min({minx:.6f}, {miny:.6f}, {minz:.6f}) max({maxx:.6f}, {maxy:.6f}, {maxz:.6f}) extents=({ex:.6f}, {ey:.6f}, {ez:.6f})"
+                    )
 
                 (VertexAttribCount, ) = struct.unpack('B', file.read(1))
                 VertexAttribs = [[], []]
@@ -518,16 +551,18 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                         BufferIndex = 0
                     if Semantic not in SemanticCount:
                         SemanticCount[Semantic] = 0
-                    print(BufferIndex, Type, Semantic, Zero)
+                    if self.debug:
+                        print(BufferIndex, Type, Semantic, Zero)
                     VertexAttribs[BufferIndex].append({"Type": Type, "Semantic": Semantic, "SemanticIndex": SemanticCount[Semantic],
                                                       "Index": AttribIndex[BufferIndex], "IndexCount": FormatIndexCount[Type]})
                     SemanticCount[Semantic] += 1
                     FormatStrings[BufferIndex] += Format[Type]
                     AttribIndex[BufferIndex] += FormatIndexCount[Type]
-                print(VertexAttribs)
-                print(FormatStrings)
-                print(struct.calcsize(FormatStrings[0]))
-                print(struct.calcsize(FormatStrings[1]))
+                if self.debug:
+                    print(VertexAttribs)
+                    print(FormatStrings)
+                    print(struct.calcsize(FormatStrings[0]))
+                    print(struct.calcsize(FormatStrings[1]))
                 # Unknown
                 struct.unpack('i', file.read(4))
                 # Unknown
@@ -563,7 +598,8 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                                     assert attrib["SemanticIndex"] == 0
                                     MeshData["Positions"].append(right_hand_matrix @ mathutils.Vector(
                                         (vertex[attrib["Index"]], vertex[attrib["Index"] + 1], vertex[attrib["Index"] + 2])))
-                                    print(vertex[attrib["Index"]], vertex[attrib["Index"] + 1], vertex[attrib["Index"] + 2])
+                                    #if self.debug:
+                                    #    print(vertex[attrib["Index"]], vertex[attrib["Index"] + 1], vertex[attrib["Index"] + 2])
 
                                 elif attrib["Semantic"] == NORMAL:
                                     # We're only supporting SHORT4_SNORM normals for now
@@ -690,3 +726,8 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column()
+        col.prop(self, "debug")
