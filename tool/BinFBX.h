@@ -37,11 +37,12 @@ namespace ControlModding
         TextureMap = 0x09,
         TextureSampler = 0x08,
         Boolean = 0x0C,
+        NoPayload = 0x10, // Observed type with no payload
     };
     enum AttributeType : uint8_t {
         FLOAT3       = 0x2,  // POSITION
         BYTE4_SNORM  = 0x4,  // TANGENT ?
-        BYTE4_UNORM  =  0x5, // BONE_WEIGHT
+        BYTE4_UNORM  = 0x5, // BONE_WEIGHT
         SHORT2_SNORM = 0x7,  // TEXCOORD
         SHORT4_SNORM = 0x8,  // NORMAL
         SHORT4_UINT  = 0xd,  // BONE_INDEX
@@ -121,6 +122,9 @@ namespace ControlModding
         size_t GetIndex() const { return mIndex; }
         size_t GetLOD() const { return mLOD; }
         std::tuple<size_t, size_t> GetVertexSizes() const;
+        size_t GetTriangleCount() const { return mTriangleCount; }
+    // Compute and append per-triangle areas to 'out'; returns true if positions were found
+    bool AccumulateTriangleAreas(std::vector<float>& out) const;
     private:
         //Internal Data-------------------------------------------------------
         size_t mIndex{};
@@ -138,12 +142,13 @@ namespace ControlModding
         std::array<uint32_t,2> mVertexBufferOffsets{};
         uint32_t mIndexBufferOffset{};
 
-        int32_t mUnknown0{};
+        int32_t mMeshFlags0{};                        // Per-mesh flags0 (bitfield)
 
-        std::array<int32_t, 4> mBoundingSphere{};
-        std::array<int32_t, 6> mBoundingBox{};
+        std::array<float, 4> mBoundingSphere{};       // (cx, cy, cz, r)
+        std::array<float, 6> mBoundingBox{};          // (minx, miny, minz, maxx, maxy, maxz)
 
-        int32_t mUnknown1{};
+        int32_t mMeshFlags1{};                        // Per-mesh flags1 (bitfield)
+        
         /// @note IMPORTANT: The AttributeInfo count must be written as a uint_8_t, not an int_32_t.
         std::vector<AttributeInfo> mAttributeInfos{};
 
@@ -161,21 +166,22 @@ namespace ControlModding
         void Dump() const;
         void RemoveMesh(uint32_t aGroup, uint32_t aLOD, uint32_t aIndex);
     private:
+    void RecomputeTrailerFromMeshes(); // updates mTotalSurfaceArea & mTriangleAreaCDF if possible
         std::array<std::vector<uint8_t>, 2> mVertexBuffers{};
         std::vector<uint8_t> mIndexBuffer{};
         uint32_t mIndexSize;
         std::vector<Joint> mJoints{};
 
-        // Block Of Unknowns
-        std::array<int32_t, 2> mUnknown0{};
-        float mUnknown1{};
-        std::vector<float> mUnknown2;
-        float mUnknown3{};
-        std::array<float, 3> mUnknown4{};
-        float mUnknown5{};
-        std::array<float, 3> mUnknown6{};
-        std::array<float, 3> mUnknown7{};
-        uint32_t mUnknown8{};
+        // Global params block (after joints)
+        std::array<int32_t, 2> mReservedInts{};       // Reserved0, Reserved1
+        float mGlobalScale{};                          // Global scale
+        std::vector<float> mLODThresholds;             // Optional LOD thresholds
+        float mMirrorSign{};                           // Mirror sign (handedness)
+        std::array<float, 3> mAABBCenter{};            // AABB center
+        float mBoundingSphereRadius{};                 // Bounding sphere radius
+        std::array<float, 3> mAABBMin{};               // AABB min
+        std::array<float, 3> mAABBMax{};               // AABB max
+        uint32_t mGlobalLODCount{};                    // Number of LOD levels present
         // Materials
         std::vector<Material> mMaterials{};
         std::array<std::vector<uint32_t>,2> mMaterialMaps{};
@@ -184,10 +190,10 @@ namespace ControlModding
         // Meshes
         std::array<std::vector<Mesh>,2> mMeshes{};
 
-        // Block Of Unknowns
-        uint32_t mUnknown9{};
-        float mUnknown10{};
-        std::vector<float> mUnknown11{};
+        // Trailing block
+        uint32_t mTailReserved0{};            // Observed 0 across dataset
+        float mTotalSurfaceArea{};            // Sum of triangle areas (approx.)
+        std::vector<float> mTriangleAreaCDF{}; // Monotonic [0..1], length ~ total triangles
     };
 }
 #endif

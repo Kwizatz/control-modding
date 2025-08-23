@@ -1,5 +1,5 @@
 /*
-Copyright (C) 2021,2022 Rodrigo Jose Hernandez Cordoba
+Copyright (C) 2021,2022,2025 Rodrigo Jose Hernandez Cordoba
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ limitations under the License.
 #include <iostream>
 #include <fstream>
 #include <algorithm>
+#include <cmath>
 #include <unordered_map>
 namespace ControlModding
 {
@@ -63,7 +64,7 @@ namespace ControlModding
         it += sizeof(int32_t) + *reinterpret_cast<const int32_t*>(&(*it));
         mUniformType = *reinterpret_cast<const uint32_t*>(&(*it));
         it += sizeof(uint32_t);            
-        switch(mUniformType)
+    switch(mUniformType)
         {
         case Float:
             mData = *reinterpret_cast<const float*>(&(*it));
@@ -109,6 +110,9 @@ namespace ControlModding
             mData = *reinterpret_cast<const uint32_t*>(&(*it));
             it += sizeof(uint32_t);
             break;
+        case NoPayload:
+            // No extra data
+            break;
         }
     }
     void UniformVariable::Write(std::ofstream& out) const
@@ -118,7 +122,7 @@ namespace ControlModding
         out.write(mName.data(), size);
 
         out.write(reinterpret_cast<const char*>(&mUniformType), sizeof(uint32_t));
-        switch(mUniformType)
+    switch(mUniformType)
         {
         case Float:
             out.write(reinterpret_cast<const char*>(&std::get<float>(mData)), sizeof(float));
@@ -143,6 +147,9 @@ namespace ControlModding
             break;
         case Boolean:
             out.write(reinterpret_cast<const char*>(&std::get<uint32_t>(mData)), sizeof(uint32_t));
+            break;
+        case NoPayload:
+            // No data to write
             break;
         }
     }
@@ -230,16 +237,16 @@ namespace ControlModding
         mIndexBufferOffset = *reinterpret_cast<const uint32_t*>(&(*it));
         it += sizeof(uint32_t);
 
-        mUnknown0 = *reinterpret_cast<const int32_t*>(&(*it));
+        mMeshFlags0 = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
 
-        memcpy(mBoundingSphere.data(), &(*it), sizeof(int32_t) *mBoundingSphere.size());
-        it += sizeof(int32_t) * mBoundingSphere.size();
+        memcpy(mBoundingSphere.data(), &(*it), sizeof(float) * mBoundingSphere.size());
+        it += sizeof(float) * mBoundingSphere.size();
 
-        memcpy(mBoundingBox.data(), &(*it), sizeof(int32_t) *mBoundingBox.size());
-        it += sizeof(int32_t) * mBoundingBox.size();
+        memcpy(mBoundingBox.data(), &(*it), sizeof(float) * mBoundingBox.size());
+        it += sizeof(float) * mBoundingBox.size();
 
-        mUnknown1 = *reinterpret_cast<const int32_t*>(&(*it));
+        mMeshFlags1 = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
 
         uint8_t count = *it++;
@@ -266,7 +273,9 @@ namespace ControlModding
         mVertexBuffers[0].reserve(mTriangleCount * 3 * std::get<0>(vertex_sizes));
         mVertexBuffers[1].reserve(mTriangleCount * 3 * std::get<1>(vertex_sizes));
         mIndexBuffer.resize(mIndexSize * mTriangleCount * 3);
-        const uint8_t* index_data = aIndexBuffer.data() + mIndexBufferOffset;
+        const uint8_t* index_data = aIndexBuffer.data() + mIndexBufferOffset * mIndexSize;
+        const size_t stride[2] = { std::get<0>(vertex_sizes), std::get<1>(vertex_sizes) };
+
         for (size_t i = 0; i < mTriangleCount; ++i)
         {
             for (size_t j = 0; j < 3; ++j)
@@ -289,9 +298,16 @@ namespace ControlModding
                 }
                 if(index_to_local.find(index) == index_to_local.end())
                 {
+                    //std::cout << "Mapping index " << index << " to local index " << index_to_local.size() << " with offsets " << mVertexBufferOffsets[0] << " and " << mVertexBufferOffsets[1] << " and Index Offset " << mIndexBufferOffset << std::endl;
                     index_to_local[index] = index_to_local.size();
-                    mVertexBuffers[0].insert(mVertexBuffers[0].end(), aVertexBuffers[0].begin() + (std::get<0>(vertex_sizes) * index), aVertexBuffers[0].begin() + (std::get<0>(vertex_sizes) * index) + std::get<0>(vertex_sizes));
-                    mVertexBuffers[1].insert(mVertexBuffers[1].end(), aVertexBuffers[1].begin() + (std::get<1>(vertex_sizes) * index), aVertexBuffers[1].begin() + (std::get<1>(vertex_sizes) * index) + std::get<1>(vertex_sizes));
+                    for(size_t k = 0;k<2;++k)
+                    {
+                        auto src_begin = aVertexBuffers[k].begin()
+                                        + static_cast<std::ptrdiff_t>(mVertexBufferOffsets[k])
+                                        + static_cast<std::ptrdiff_t>(index)  * stride[k];
+                        auto src_end   = src_begin + static_cast<std::ptrdiff_t>(stride[k]);
+                        mVertexBuffers[k].insert(mVertexBuffers[k].end(), src_begin, src_end);
+                    }
                 }
                 switch(mIndexSize)
                 {
@@ -323,6 +339,7 @@ namespace ControlModding
                 *((i.Index) ? &std::get<0>(result) : &std::get<1>(result)) += 12;
             break;
                 case AttributeType::BYTE4_SNORM:
+                case AttributeType::BYTE4_UNORM:
                 case AttributeType::BYTE4_UINT:
                 case AttributeType::SHORT2_SNORM:
                 *((i.Index) ? &std::get<0>(result) : &std::get<1>(result)) += 4;
@@ -336,6 +353,72 @@ namespace ControlModding
         return result;
     }
 
+    bool Mesh::AccumulateTriangleAreas(std::vector<float>& out) const
+    {
+        // Find POSITION attribute entry (FLOAT3). Index indicates which buffer (0: attr, 1: vertex)
+        int posIndex = -1;
+        for (const auto& a : mAttributeInfos)
+        {
+            if (a.Type == AttributeType::FLOAT3 && a.Usage == 0x00 /*POSITION by convention*/)
+            {
+                posIndex = a.Index ? 0 : 1; // our storage uses [0]=attr, [1]=vertex
+                break;
+            }
+        }
+        if (posIndex < 0) return false;
+
+        const uint8_t* posBuf = mVertexBuffers[posIndex].data();
+        size_t stride = (posIndex==0) ? std::get<0>(GetVertexSizes()) : std::get<1>(GetVertexSizes());
+        if (stride == 0) return false;
+
+        auto loadPos = [&](size_t v)->std::array<float,3>
+        {
+            const float* p = reinterpret_cast<const float*>(posBuf + v*stride);
+            return {p[0], p[1], p[2]};
+        };
+        auto sub = [](const std::array<float,3>& a, const std::array<float,3>& b){return std::array<float,3>{a[0]-b[0],a[1]-b[1],a[2]-b[2]};};
+        auto cross = [](const std::array<float,3>& a, const std::array<float,3>& b){return std::array<float,3>{a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]};};
+        auto norm = [](const std::array<float,3>& a){return std::sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);};
+
+        // Use local index buffer which is already remapped
+        const uint8_t* indices = mIndexBuffer.data();
+        for (size_t i = 0; i < mTriangleCount; ++i)
+        {
+            size_t i0, i1, i2;
+            switch(mIndexSize)
+            {
+            case 1:
+                i0 = indices[i*3+0]; i1 = indices[i*3+1]; i2 = indices[i*3+2];
+                break;
+            case 2:
+                i0 = reinterpret_cast<const uint16_t*>(indices)[i*3+0];
+                i1 = reinterpret_cast<const uint16_t*>(indices)[i*3+1];
+                i2 = reinterpret_cast<const uint16_t*>(indices)[i*3+2];
+                break;
+            case 4:
+                i0 = reinterpret_cast<const uint32_t*>(indices)[i*3+0];
+                i1 = reinterpret_cast<const uint32_t*>(indices)[i*3+1];
+                i2 = reinterpret_cast<const uint32_t*>(indices)[i*3+2];
+                break;
+            case 8:
+                i0 = static_cast<size_t>(reinterpret_cast<const uint64_t*>(indices)[i*3+0]);
+                i1 = static_cast<size_t>(reinterpret_cast<const uint64_t*>(indices)[i*3+1]);
+                i2 = static_cast<size_t>(reinterpret_cast<const uint64_t*>(indices)[i*3+2]);
+                break;
+            default:
+                return false;
+            }
+            auto p0 = loadPos(i0);
+            auto p1 = loadPos(i1);
+            auto p2 = loadPos(i2);
+            auto e0 = sub(p1,p0);
+            auto e1 = sub(p2,p0);
+            float area = 0.5f * norm(cross(e0,e1));
+            out.push_back(area);
+        }
+        return true;
+    }
+
     void Mesh::Write(std::ofstream& out) const
     {
         out.write(reinterpret_cast<const char*>(&mLOD), sizeof(uint32_t));
@@ -343,10 +426,10 @@ namespace ControlModding
         out.write(reinterpret_cast<const char*>(&mTriangleCount), sizeof(uint32_t));
         out.write(reinterpret_cast<const char*>(mVertexBufferOffsets.data()), sizeof(uint32_t) * mVertexBufferOffsets.size());
         out.write(reinterpret_cast<const char*>(&mIndexBufferOffset), sizeof(uint32_t));
-        out.write(reinterpret_cast<const char*>(&mUnknown0), sizeof(int32_t));
-        out.write(reinterpret_cast<const char*>(mBoundingSphere.data()), sizeof(int32_t) * mBoundingSphere.size());
-        out.write(reinterpret_cast<const char*>(mBoundingBox.data()), sizeof(int32_t) * mBoundingBox.size());
-        out.write(reinterpret_cast<const char*>(&mUnknown1), sizeof(int32_t));
+        out.write(reinterpret_cast<const char*>(&mMeshFlags0), sizeof(int32_t));
+        out.write(reinterpret_cast<const char*>(mBoundingSphere.data()), sizeof(float) * mBoundingSphere.size());
+        out.write(reinterpret_cast<const char*>(mBoundingBox.data()), sizeof(float) * mBoundingBox.size());
+        out.write(reinterpret_cast<const char*>(&mMeshFlags1), sizeof(int32_t));
         uint8_t count = static_cast<uint8_t>(mAttributeInfos.size());
         out.write(reinterpret_cast<const char*>(&count), 1);
         out.write(reinterpret_cast<const char*>(mAttributeInfos.data()), sizeof(decltype(mAttributeInfos)::value_type) * mAttributeInfos.size());
@@ -362,6 +445,7 @@ namespace ControlModding
         std::cout << "LOD: " << mLOD << std::endl;
         std::cout << "VertexCount: " << mVertexCount << std::endl;
         std::cout << "TriangleCount: " << mTriangleCount << std::endl;
+        std::cout << "Flags0: 0x" << std::hex << mMeshFlags0 << std::dec << std::endl;
         std::cout << "VertexBufferOffsets: ";
         for (const auto& i : mVertexBufferOffsets)
         {
@@ -369,6 +453,10 @@ namespace ControlModding
         }
         std::cout << std::endl;
         std::cout << "IndexBufferOffset: " << mIndexBufferOffset << std::endl;
+        std::cout << "BoundingSphere: (" << mBoundingSphere[0] << ", " << mBoundingSphere[1] << ", " << mBoundingSphere[2] << ", r=" << mBoundingSphere[3] << ")" << std::endl;
+        std::cout << "AABBMin: (" << mBoundingBox[0] << ", " << mBoundingBox[1] << ", " << mBoundingBox[2] << ")" << std::endl;
+        std::cout << "AABBMax: (" << mBoundingBox[3] << ", " << mBoundingBox[4] << ", " << mBoundingBox[5] << ")" << std::endl;
+        std::cout << "Flags1: 0x" << std::hex << mMeshFlags1 << std::dec << std::endl;
 #if 0
         std::cout << "Indices: " << std::endl;
         const uint8_t* indices = mIndexBuffer.data();
@@ -431,38 +519,39 @@ namespace ControlModding
             mJoints.emplace_back(it);
         }
 
-        // Unknown Block
-        memcpy(mUnknown0.data(), &(*it), sizeof(int32_t) * mUnknown0.size());
-        it += sizeof(int32_t) * mUnknown0.size();
+        // Global params block
+        memcpy(mReservedInts.data(), &(*it), sizeof(int32_t) * mReservedInts.size());
+        it += sizeof(int32_t) * mReservedInts.size();
 
-        mUnknown1 = *reinterpret_cast<const float*>(&(*it));
+        mGlobalScale = *reinterpret_cast<const float*>(&(*it));
         it += sizeof(float);
 
         count = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
-        mUnknown2.reserve(count);
+        mLODThresholds.clear();
+        mLODThresholds.reserve(count);
         for (int32_t i = 0; i < count; ++i)
         {
-            mUnknown2.emplace_back(*reinterpret_cast<const float*>(&(*it)));
+            mLODThresholds.emplace_back(*reinterpret_cast<const float*>(&(*it)));
             it += sizeof(float);
         }
 
-        mUnknown3 = *reinterpret_cast<const float*>(&(*it));
+        mMirrorSign = *reinterpret_cast<const float*>(&(*it));
         it += sizeof(float);
 
-        memcpy(mUnknown4.data(), &(*it), sizeof(float) * mUnknown4.size());
-        it += sizeof(float) * mUnknown4.size();
+        memcpy(mAABBCenter.data(), &(*it), sizeof(float) * mAABBCenter.size());
+        it += sizeof(float) * mAABBCenter.size();
 
-        mUnknown5 = *reinterpret_cast<const float*>(&(*it));
+        mBoundingSphereRadius = *reinterpret_cast<const float*>(&(*it));
         it += sizeof(float);
 
-        memcpy(mUnknown6.data(), &(*it), sizeof(float) * mUnknown6.size());
-        it += sizeof(float) * mUnknown6.size();
+        memcpy(mAABBMin.data(), &(*it), sizeof(float) * mAABBMin.size());
+        it += sizeof(float) * mAABBMin.size();
 
-        memcpy(mUnknown7.data(), &(*it), sizeof(float) * mUnknown7.size());
-        it += sizeof(float) * mUnknown7.size();
+        memcpy(mAABBMax.data(), &(*it), sizeof(float) * mAABBMax.size());
+        it += sizeof(float) * mAABBMax.size();
 
-        mUnknown8 = *reinterpret_cast<const uint32_t*>(&(*it));
+        mGlobalLODCount = *reinterpret_cast<const uint32_t*>(&(*it));
         it += sizeof(uint32_t);
 
         // Materials
@@ -512,7 +601,7 @@ namespace ControlModding
         for (int32_t i = 0; i < count; ++i)
         {
             mMaterialMaps[1].emplace_back(*reinterpret_cast<const uint32_t*>(&(*it)));
-            it += sizeof(float);
+            it += sizeof(uint32_t);
         }
 
         // Meshes
@@ -534,20 +623,51 @@ namespace ControlModding
             }
         }
 
-        // Unknowns
-        mUnknown9 = *reinterpret_cast<const uint32_t*>(&(*it)); 
+        // Trailing block
+        mTailReserved0 = *reinterpret_cast<const uint32_t*>(&(*it)); 
         it += sizeof(uint32_t);
-        mUnknown10 = *reinterpret_cast<const float*>(&(*it));
+        mTotalSurfaceArea = *reinterpret_cast<const float*>(&(*it));
         it += sizeof(float);
 
         count = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
-        mUnknown11.reserve(count);
+        mTriangleAreaCDF.reserve(count);
         for (int32_t i = 0; i < count; ++i)
         {
-            mUnknown11.emplace_back(*reinterpret_cast<const float*>(&(*it)));
+            mTriangleAreaCDF.emplace_back(*reinterpret_cast<const float*>(&(*it)));
             it += sizeof(float);
         }
+    }
+
+    void BinFBX::RecomputeTrailerFromMeshes()
+    {
+        // Aggregate triangle areas across both groups
+        std::vector<float> areas;
+        areas.reserve(1024);
+        bool ok = false;
+        for (const auto& group : mMeshes)
+        {
+            for (const auto& mesh : group)
+            {
+                ok = mesh.AccumulateTriangleAreas(areas) || ok;
+            }
+        }
+        if (!ok || areas.empty()) return; // leave existing trailer untouched if we couldn't compute
+        // Compute total and CDF normalized to 1.0
+        double total = 0.0;
+        for (float a : areas) total += a;
+        if (total <= 0.0) return;
+        mTotalSurfaceArea = static_cast<float>(total);
+        mTriangleAreaCDF.resize(areas.size());
+        double accum = 0.0;
+        for (size_t i = 0; i < areas.size(); ++i)
+        {
+            accum += areas[i];
+            mTriangleAreaCDF[i] = static_cast<float>(accum / total);
+        }
+        // Clamp last to 1.0 exactly
+        if (!mTriangleAreaCDF.empty()) mTriangleAreaCDF.back() = 1.0f;
+        mTailReserved0 = 0;
     }
 
     void BinFBX::Write(std::string_view aFileName) const
@@ -581,20 +701,23 @@ namespace ControlModding
             i.Write(out);
         }
 
-        // Block Of Unknowns
-        out.write(reinterpret_cast<const char*>(mUnknown0.data()), sizeof(decltype(mUnknown0)::value_type) * mUnknown0.size());
-        out.write(reinterpret_cast<const char*>(&mUnknown1), sizeof(float));
+        // Global params block
+        out.write(reinterpret_cast<const char*>(mReservedInts.data()), sizeof(decltype(mReservedInts)::value_type) * mReservedInts.size());
+        out.write(reinterpret_cast<const char*>(&mGlobalScale), sizeof(float));
 
-        size = static_cast<uint32_t>(mUnknown2.size());
+        size = static_cast<uint32_t>(mLODThresholds.size());
         out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
-        out.write(reinterpret_cast<const char*>(mUnknown2.data()), sizeof(decltype(mUnknown2)::value_type) * mUnknown2.size());
+        if (size)
+        {
+            out.write(reinterpret_cast<const char*>(mLODThresholds.data()), sizeof(float) * mLODThresholds.size());
+        }
 
-        out.write(reinterpret_cast<const char*>(&mUnknown3), sizeof(float));
-        out.write(reinterpret_cast<const char*>(mUnknown4.data()), sizeof(decltype(mUnknown4)::value_type) * mUnknown4.size());
-        out.write(reinterpret_cast<const char*>(&mUnknown5), sizeof(float));
-        out.write(reinterpret_cast<const char*>(mUnknown6.data()), sizeof(decltype(mUnknown6)::value_type) * mUnknown6.size());
-        out.write(reinterpret_cast<const char*>(mUnknown7.data()), sizeof(decltype(mUnknown7)::value_type) * mUnknown7.size());
-        out.write(reinterpret_cast<const char*>(&mUnknown8), sizeof(uint32_t));
+        out.write(reinterpret_cast<const char*>(&mMirrorSign), sizeof(float));
+        out.write(reinterpret_cast<const char*>(mAABBCenter.data()), sizeof(float) * mAABBCenter.size());
+        out.write(reinterpret_cast<const char*>(&mBoundingSphereRadius), sizeof(float));
+        out.write(reinterpret_cast<const char*>(mAABBMin.data()), sizeof(float) * mAABBMin.size());
+        out.write(reinterpret_cast<const char*>(mAABBMax.data()), sizeof(float) * mAABBMax.size());
+        out.write(reinterpret_cast<const char*>(&mGlobalLODCount), sizeof(uint32_t));
 
         // Materials
         size = static_cast<uint32_t>(mMaterials.size());
@@ -634,24 +757,78 @@ namespace ControlModding
             }
         }
 
-        out.write(reinterpret_cast<const char*>(&mUnknown9), sizeof(uint32_t));
-        out.write(reinterpret_cast<const char*>(&mUnknown10), sizeof(float));
+    out.write(reinterpret_cast<const char*>(&mTailReserved0), sizeof(uint32_t));
+    out.write(reinterpret_cast<const char*>(&mTotalSurfaceArea), sizeof(float));
 
-        size = static_cast<float>(mUnknown11.size());
+    size = static_cast<uint32_t>(mTriangleAreaCDF.size());
         out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
-        out.write(reinterpret_cast<const char*>(mUnknown11.data()), sizeof(float) * mUnknown11.size());
+    out.write(reinterpret_cast<const char*>(mTriangleAreaCDF.data()), sizeof(float) * mTriangleAreaCDF.size());
 
         out.close();
     }
 
     void BinFBX::Dump() const
     {
-        for(auto &i: mMeshes)
+        std::cout << "GlobalParams" << std::endl;
+        std::cout << "  Reserved: " << mReservedInts[0] << ", " << mReservedInts[1] << std::endl;
+        std::cout << "  GlobalScale: " << mGlobalScale << std::endl;
+        std::cout << "  LODThresholds (" << mLODThresholds.size() << "):";
+        for (auto v : mLODThresholds) {std::cout << " " << v;}
+        std::cout << std::endl;
+        std::cout << "  MirrorSign: " << mMirrorSign << std::endl;
+        std::cout << "  AABBCenter: (" << mAABBCenter[0] << ", " << mAABBCenter[1] << ", " << mAABBCenter[2] << ")" << std::endl;
+        std::cout << "  BoundingSphereRadius: " << mBoundingSphereRadius << std::endl;
+        std::cout << "  AABBMin: (" << mAABBMin[0] << ", " << mAABBMin[1] << ", " << mAABBMin[2] << ")" << std::endl;
+        std::cout << "  AABBMax: (" << mAABBMax[0] << ", " << mAABBMax[1] << ", " << mAABBMax[2] << ")" << std::endl;
+        std::cout << "  GlobalLODCount: " << mGlobalLODCount << std::endl;
+        std::array<std::vector<size_t>, 2> totalTriangleCount{{}};
+        size_t triangleCount[2] = {0};
         {
-            for(auto &j: i)
+            size_t groupIndex = 0;
+            for (const auto &group : mMeshes)
             {
-                j.Dump();
+                std::cout << "Group " << groupIndex << std::endl;
+                for (const auto &mesh : group)
+                {
+                    mesh.Dump();
+                    totalTriangleCount[groupIndex].push_back(mesh.GetTriangleCount());
+                    triangleCount[groupIndex] += mesh.GetTriangleCount();
+                }
+                ++groupIndex;
             }
+        }
+
+        // Trailing block summary
+        std::cout << "Trailer" << std::endl;
+        std::cout << "  Reserved0 (u32): " << mTailReserved0 << std::endl;
+        std::cout << "  TotalSurfaceArea (float): " << mTotalSurfaceArea << std::endl;
+        std::cout << "  TriangleAreaCDF count: " << mTriangleAreaCDF.size() << std::endl;
+        if (!mTriangleAreaCDF.empty())
+        {
+            std::cout << "    head:";
+            for (size_t i = 0; i < std::min<size_t>(mTriangleAreaCDF.size(), 8); ++i)
+            {
+                std::cout << " " << mTriangleAreaCDF[i];
+            }
+            auto minmax = std::minmax_element(mTriangleAreaCDF.begin(), mTriangleAreaCDF.end());
+            bool nonneg = std::all_of(mTriangleAreaCDF.begin(), mTriangleAreaCDF.end(), [](float x){return x >= 0.0f;});
+            bool mono_inc = std::is_sorted(mTriangleAreaCDF.begin(), mTriangleAreaCDF.end());
+            bool mono_dec = std::is_sorted(mTriangleAreaCDF.begin(), mTriangleAreaCDF.end(), std::greater<float>());
+            std::cout << "\n    min=" << *minmax.first << " max=" << *minmax.second
+                      << " nonneg=" << (nonneg?"true":"false")
+                      << " mono_inc=" << (mono_inc?"true":"false")
+                      << " mono_dec=" << (mono_dec?"true":"false")
+                      << std::endl;
+            for (const auto& group : totalTriangleCount)
+            {
+                std::cout << "  Group " << (&group - &totalTriangleCount[0]) << ":";
+                for (const auto& count : group)
+                {
+                    std::cout << " " << count;
+                }
+                std::cout << std::endl;
+            }
+            std::cout << "TotalTriangleCount: " << triangleCount[0] << " " << triangleCount[1] << std::endl;
         }
     }
     void BinFBX::RemoveMesh(uint32_t aGroup, uint32_t aLOD, uint32_t aIndex)
@@ -676,5 +853,7 @@ namespace ControlModding
             /// @todo Need to make sure which mesh group is the one alternate material map is pointing to
             mAlternateMaterialMaps.erase(mAlternateMaterialMaps.begin() + index);
         }
+        // Keep trailer consistent with current meshes
+        RecomputeTrailerFromMeshes();
     }
 }
