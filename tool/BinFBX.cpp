@@ -54,6 +54,8 @@ namespace ControlModding
         out.write(reinterpret_cast<const char*>(&mParent), sizeof(int32_t));
     }
 
+    
+
 
     UniformVariable::UniformVariable(std::vector<uint8_t>::const_iterator& it):
         mName
@@ -65,7 +67,7 @@ namespace ControlModding
         it += sizeof(int32_t) + *reinterpret_cast<const int32_t*>(&(*it));
         mUniformType = *reinterpret_cast<const uint32_t*>(&(*it));
         it += sizeof(uint32_t);            
-    switch(mUniformType)
+        switch(mUniformType)
         {
         case Float:
             mData = *reinterpret_cast<const float*>(&(*it));
@@ -302,12 +304,12 @@ namespace ControlModding
             mAttributeInfos.emplace_back(it);
         }
 
-        mUnknown2 = *reinterpret_cast<const int32_t*>(&(*it));
+    mJoint = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
         mUnknown3 = *reinterpret_cast<const float*>(&(*it));
         it += sizeof(float);
 
-        mUnknown4 = *it++;
+    mIsRigidMesh = *it++;
 
         mUnknown5 = *reinterpret_cast<const float*>(&(*it));
         it += sizeof(float);
@@ -465,6 +467,8 @@ namespace ControlModding
         return true;
     }
 
+    
+
     void Mesh::Write(std::ofstream& out) const
     {
         out.write(reinterpret_cast<const char*>(&mLOD), sizeof(uint32_t));
@@ -479,9 +483,9 @@ namespace ControlModding
         uint8_t count = static_cast<uint8_t>(mAttributeInfos.size());
         out.write(reinterpret_cast<const char*>(&count), 1);
         out.write(reinterpret_cast<const char*>(mAttributeInfos.data()), sizeof(decltype(mAttributeInfos)::value_type) * mAttributeInfos.size());
-        out.write(reinterpret_cast<const char*>(&mUnknown2), sizeof(int32_t));
+        out.write(reinterpret_cast<const char*>(&mJoint), sizeof(int32_t));
         out.write(reinterpret_cast<const char*>(&mUnknown3), sizeof(float));
-        out.write(reinterpret_cast<const char*>(&mUnknown4), 1);
+        out.write(reinterpret_cast<const char*>(&mIsRigidMesh), 1);
         out.write(reinterpret_cast<const char*>(&mUnknown5), sizeof(float));
     }
 
@@ -503,6 +507,16 @@ namespace ControlModding
         std::cout << "AABBMin: (" << mBoundingBox[0] << ", " << mBoundingBox[1] << ", " << mBoundingBox[2] << ")" << std::endl;
         std::cout << "AABBMax: (" << mBoundingBox[3] << ", " << mBoundingBox[4] << ", " << mBoundingBox[5] << ")" << std::endl;
         std::cout << "Flags1: 0x" << std::hex << mMeshFlags1 << std::dec << std::endl;
+    // Unknowns: surfaced for analysis. Early dataset hints:
+    //  - Unknown3 and Unknown5 are floats; they cluster to a few constants in many files.
+    std::cout << "Joint (int32): " << mJoint << std::endl;
+    std::cout << "Unknown3 (float): " << mUnknown3 << std::endl;
+    {
+        const char* skinStr = (mIsRigidMesh == 0) ? "skinned" : (mIsRigidMesh == 1 ? "rigid" : "unknown");
+        std::cout << "IsRigidMesh (u8): " << static_cast<uint32_t>(mIsRigidMesh) << " [" << skinStr << "]" << std::endl;
+    }
+    std::cout << "Unknown5 (float): " << mUnknown5 << std::endl;
+    //
 #if 0
         std::cout << "Indices: " << std::endl;
         const uint8_t* indices = mIndexBuffer.data();
@@ -803,13 +817,11 @@ namespace ControlModding
             }
         }
 
-    out.write(reinterpret_cast<const char*>(&mTailReserved0), sizeof(uint32_t));
-    out.write(reinterpret_cast<const char*>(&mTotalSurfaceArea), sizeof(float));
-
-    size = static_cast<uint32_t>(mTriangleAreaCDF.size());
+        out.write(reinterpret_cast<const char*>(&mTailReserved0), sizeof(uint32_t));
+        out.write(reinterpret_cast<const char*>(&mTotalSurfaceArea), sizeof(float));
+        size = static_cast<uint32_t>(mTriangleAreaCDF.size());
         out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
-    out.write(reinterpret_cast<const char*>(mTriangleAreaCDF.data()), sizeof(float) * mTriangleAreaCDF.size());
-
+        out.write(reinterpret_cast<const char*>(mTriangleAreaCDF.data()), sizeof(float) * mTriangleAreaCDF.size());
         out.close();
     }
 

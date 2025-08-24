@@ -78,7 +78,7 @@ namespace ControlModding
     {
     public:
         Joint(std::vector<uint8_t>::const_iterator& it);
-        void Write(std::ofstream& out) const;
+    void Write(std::ofstream& out) const;
     private:
         std::string mName;
         std::array<float, 12> mMatrix{};
@@ -119,8 +119,8 @@ namespace ControlModding
     {
     public:
         Mesh(size_t aIndex, const std::array<std::vector<uint8_t>, 2>& aVertexBuffers,const std::vector<uint8_t>& aIndexBuffer, uint32_t aIndexSize, std::vector<uint8_t>::const_iterator& it);
-        void Write(std::ofstream& out) const;
-        void Dump() const;
+    void Write(std::ofstream& out) const;
+    void Dump() const;
         size_t GetIndex() const { return mIndex; }
         size_t GetLOD() const { return mLOD; }
         std::tuple<size_t, size_t> GetVertexSizes() const;
@@ -154,10 +154,10 @@ namespace ControlModding
         /// @note IMPORTANT: The AttributeInfo count must be written as a uint_8_t, not an int_32_t.
         std::vector<AttributeInfo> mAttributeInfos{};
 
-        int32_t mUnknown2{};
-        float mUnknown3{};
-        uint8_t mUnknown4{};
-        float mUnknown5{};
+    int32_t mJoint{};       // per-mesh joint-related value (palette size or capacity)
+    float mUnknown3{};     // float parameter; clusters at 1.0 for many; role TBD
+    uint8_t mIsRigidMesh{}; // 1 = rigid/static (no weights), 0 = skinned
+    float mUnknown5{};     // float parameter; decals show powers-of-two-ish values (4,8,16...); role TBD
     };
 
     class BinFBX
