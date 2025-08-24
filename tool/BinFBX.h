@@ -104,12 +104,14 @@ namespace ControlModding
     public:
         Material(std::vector<uint8_t>::const_iterator& it);
         void Write(std::ofstream& out) const;
+    void Dump() const;
     private:
         std::array<uint8_t, 8> mMaterialId{};
         std::string mName;
         std::string mType;
         std::string mPath;
-        std::array<int32_t, 6> mUnknown0{};
+    // Six 32-bit material params observed to behave like bitfields/enums
+    std::array<uint32_t, 6> mMaterialParams{};
         std::vector<UniformVariable> mUniformVariables{};
     };
 

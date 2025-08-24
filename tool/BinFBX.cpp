@@ -22,6 +22,7 @@ limitations under the License.
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
+#include <sstream>
 namespace ControlModding
 {
     Joint::Joint(std::vector<uint8_t>::const_iterator& it) :
@@ -186,8 +187,8 @@ namespace ControlModding
         };
         it += sizeof(int32_t) + *reinterpret_cast<const int32_t*>(&(*it));
 
-        memcpy(mUnknown0.data(), &(*it), sizeof(int32_t) * mUnknown0.size());
-        it += sizeof(int32_t) * mUnknown0.size();
+    memcpy(mMaterialParams.data(), &(*it), sizeof(uint32_t) * mMaterialParams.size());
+    it += sizeof(uint32_t) * mMaterialParams.size();
 
         int32_t count = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
@@ -211,13 +212,58 @@ namespace ControlModding
         size = static_cast<uint32_t>(mPath.size());
         out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
         out.write(mPath.data(), size);
-        out.write(reinterpret_cast<const char*>(mUnknown0.data()), sizeof(int32_t) * mUnknown0.size());
+        out.write(reinterpret_cast<const char*>(mMaterialParams.data()), sizeof(uint32_t) * mMaterialParams.size());
         size = static_cast<uint32_t>(mUniformVariables.size());
         out.write(reinterpret_cast<const char*>(&size), sizeof(int32_t));
         for (const auto& i : mUniformVariables)
         {
             i.Write(out);
         }
+    }
+
+    void Material::Dump() const
+    {
+        auto hexu = [](uint32_t v){ std::ostringstream oss; oss << "0x" << std::hex << v; return oss.str(); };
+        auto familyName = [&](uint32_t v)->const char*
+        {
+            switch(v){
+                case 0x0: return "standard";
+                case 0x1: return "hair";
+                case 0x2: return "eye";
+                case 0x3: return "cloth";
+                default:  return "unknown";
+            }
+        };
+        auto renderName = [&](uint32_t v)->const char*
+        {
+            switch(v){
+                case 0x4: return "opaque/default";
+                case 0x1: return "alpha/masked";
+                case 0x8: return "additive";
+                default:  return "unknown";
+            }
+        };
+
+        const uint32_t u0 = mMaterialParams[0]; // MaterialFlags (bitfield)
+        const uint32_t u1 = mMaterialParams[1]; // DecalMode
+        const uint32_t u2 = mMaterialParams[2]; // LayoutVariant
+        const uint32_t u3 = mMaterialParams[3]; // LightingVariant
+        const uint32_t u4 = mMaterialParams[4]; // MaterialFamily
+        const uint32_t u5 = mMaterialParams[5]; // RenderMode
+
+        const bool specialPipeline = (u0 & 0x80000000u) != 0;
+
+        std::cout << "Material" << std::endl;
+        std::cout << "  Name: " << mName << " Type: " << mType << std::endl;
+        std::cout << "  Path: " << mPath << std::endl;
+        std::cout << "  Family(u4): " << hexu(u4) << " (" << familyName(u4) << ")" << std::endl;
+        std::cout << "  RenderMode(u5): " << hexu(u5) << " (" << renderName(u5) << ")" << std::endl;
+        std::cout << "  Flags(u0): " << hexu(u0) << " (SpecialPipeline=" << (specialPipeline?"on":"off") << ")" << std::endl;
+        std::cout << "  DecalMode(u1): " << hexu(u1);
+        if (mType.find("decal") != std::string::npos) std::cout << "  [decal]";
+        std::cout << std::endl;
+        std::cout << "  LayoutVariant(u2): " << hexu(u2) << ", LightingVariant(u3): " << hexu(u3) << std::endl;
+        std::cout << "  Uniforms: " << mUniformVariables.size() << std::endl;
     }
 
     Mesh::Mesh(size_t aIndex, const std::array<std::vector<uint8_t>, 2>& aVertexBuffers,const std::vector<uint8_t>& aIndexBuffer, uint32_t aIndexSize, std::vector<uint8_t>::const_iterator& it) : mIndex{aIndex}, mIndexSize{aIndexSize}
@@ -781,6 +827,13 @@ namespace ControlModding
         std::cout << "  AABBMin: (" << mAABBMin[0] << ", " << mAABBMin[1] << ", " << mAABBMin[2] << ")" << std::endl;
         std::cout << "  AABBMax: (" << mAABBMax[0] << ", " << mAABBMax[1] << ", " << mAABBMax[2] << ")" << std::endl;
         std::cout << "  GlobalLODCount: " << mGlobalLODCount << std::endl;
+        // Materials summary
+        std::cout << "Materials (" << mMaterials.size() << ")" << std::endl;
+        for (const auto& m : mMaterials)
+        {
+            m.Dump();
+        }
+
         std::array<std::vector<size_t>, 2> totalTriangleCount{{}};
         size_t triangleCount[2] = {0};
         {
