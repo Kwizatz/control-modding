@@ -53,12 +53,18 @@ Field names are not in any way official and were selected to best represent the 
 | uint8_t[]  | VertexBuffer        | Byte array of size VertexBufferSize. Can be read as an array of float vec3     |
 | uint8_t[]  | IndexBuffer         | Byte array of size IndexCount * IndexSize                                      |
 | See below  | Binding Skeleton    | While Optional if not available you'll find a uint32_t of 0x00000000 here      |
-| float[3]   | UpVector            | Usually  x = 0, y = 0, z = 1                                                   |
-| float[]    | Unknown             | Variable array of floats, seen 0 and 3, need to inspect more files             |
+| uint32_t[2]| Reserved            | Always both zero accross all game files                                        |
+| float      | GlobalScale         | Not sure what this does                                                        |
+| uint32_t[] | LOD Thresholds      | Not sure what this does (related to CDFs?)                                     |
+| float      | MirrorSign          | Not sure what this does, supposed to be related to matrix mirroring            |
+| float[3]   | Bounding Sphere Ctr | Fixed size array of 3 floats representing Global Bounding Sphere Center        |
+| float      | B. Sphere radius    | 1 float representing Global Bounding Sphere Radius                             |
+| float[3]   | AABB Min            | Fixed size array of 3 floats representing Global AABB Min                      |
+| float[3]   | AABB Max            | Fixed size array of 3 floats representing Global AABB Max                      |
 | float[11]  | Unknown             | Fixed size array of 11 floats                                                  |
 | uint32_t   | LoDCount            | Number of Level of Detail meshes                                               |
-| See below  | Uniform Data        | A combination of uniform metadata and actual values to set in uniform bindings |
-|            |                     | To Be Continued                                                                |
+| See below  | Material Data       | A combination of uniform metadata and actual values to set in uniform bindings |
+| See below  | Mesh Data           | Data on where each mesh is located in the buffers                              |
 
 ## Binding Skeleton
 
@@ -117,21 +123,49 @@ For some reason Volfin made the comment on the Blender importer that the count s
 
 Note: TextureSampler contains no data, likely because you need to generate a texture name or id on DirectX, OpenGL or Vulkan that you will not know until runtime, not sure why have a texture map and a texture sampler yet.
 
-## To Be Continued
+### Mesh Data
 
-Here is where things really confusing and hackish in the importer, it's not that the info is not there, but rather that the way it is layed out is confusing and variable names don't make entire sense. I will try to reorder it better and see if that way I can get some clues on what is what.
+| Type       |  Name               |  Comment                                                                                                                                                                                           |
+|------------|:-------------------:|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| uint32_t   | LOD                 | Level of detail for the mesh                                                                                                                                                                       |
+| uint32_t   | VertexCount         | Number of vertices in the mesh                                                                                                                                                                     |
+| uint32_t   | TriangleCount       | Number of triangles in the mesh                                                                                                                                                                    |
+| uint32_t[2]| VertexBufferOffset  | Offset to the vertex buffer data for both Vertex and Attribute Buffers                                                                                                                             |
+| uint32_t   | IndexBufferOffset   | Offset to the index buffer data                                                                                                                                                                    |
+| int32_t    | mMeshFlags0         | Not sure                                                                                                                                                                                           |
+| float[4]   | mBoundingSphere     | Bounding sphere of the mesh                                                                                                                                                                        |
+| float[6]   | mBoundingBox        | Bounding box of the mesh                                                                                                                                                                           |
+| int32_t    | mMeshFlags1         | Not sure                                                                                                                                                                                           |
+| See Below  | Attribute Infos     | Vertex Attribute metadata                                                                                                                                                                          |
+| uint32_t   | MaterialBufferOffset| Offset to the material buffer data                                                                                                                                                                 |
+| uint32_t   | SubMeshBufferOffset | Offset to the sub-mesh buffer data                                                                                                                                                                 |
+| int32_t    | Joint               | Unsure, its definitely related to the skeleton, but its usually a very high if not the last of the joint indices. Could suggest a "Joint Palette", but I dont know that that even means            |
+| int32_t    | Unknown             | Who knows?                                                                                                                                                                                         |
+| uint8_t    | IsRigidMesh         | If no skeleton joint deforms this mesh, this is 1 otherwhise is 0                                                                                                                                  |
+| float      | Unknown             | Who knows?                                                                                                                                                                                         |
 
-# Remedy's binskeleton file format specification.
+### Attribute Infos
+
+This is an array of the following structure, one for each vertex attribute:
+
+| Type       |  Name               |  Comment                                                                                                           |
+|------------|:-------------------:|--------------------------------------------------------------------------------------------------------------------|
+| uint8_t    | Index               | 0x0 = AttributeBuffer, 0x1 = VertexBuffer                                                                         |
+| uint8_t    | Type                | 0x4 = B8G8R8A8_UNORM, 0x7 = R16G16_SINT, 0x8 = R16G16B16A16_SINT, 0xd = R16G16B16A16_UINT, 0x5 = R8G8B8A8_UINT |
+| uint8_t    | Usage               | 0x1 = Normal, 0x2 = TexCoord, 0x3 = Tangent, 0x5 = Index, 0x6 = Weight                                           |
+| uint8_t    | Zero                | Always 0?                                                                                                          |
+
+## Remedy's binskeleton file format specification
 
 This section describes the binary structure of Remedy's Control video game skeleton format with extension .binskeleton.
 
 This research is entirelly original based on reverse engineering with the help of IDA Free 9.0 as well as Ghidra.
 
-## File Structure
+### Skeleton File Structure
 
 Field names are not in any way official and were selected to best represent the information they contain.
 
-## General arrangement
+### Skeleton General arrangement
 
 | Type       |  Name                    |  Comment                                                                                                                                                                           |
 |------------|:------------------------:|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

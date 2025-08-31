@@ -54,9 +54,6 @@ namespace ControlModding
         out.write(reinterpret_cast<const char*>(&mParent), sizeof(int32_t));
     }
 
-    
-
-
     UniformVariable::UniformVariable(std::vector<uint8_t>::const_iterator& it):
         mName
         {
@@ -118,6 +115,7 @@ namespace ControlModding
             break;
         }
     }
+
     void UniformVariable::Write(std::ofstream& out) const
     {
         uint32_t size = static_cast<uint32_t>(mName.size());
@@ -304,12 +302,12 @@ namespace ControlModding
             mAttributeInfos.emplace_back(it);
         }
 
-    mJoint = *reinterpret_cast<const int32_t*>(&(*it));
+        mJoint = *reinterpret_cast<const int32_t*>(&(*it));
         it += sizeof(int32_t);
         mUnknown3 = *reinterpret_cast<const float*>(&(*it));
         it += sizeof(float);
 
-    mIsRigidMesh = *it++;
+        mIsRigidMesh = *it++;
 
         mUnknown5 = *reinterpret_cast<const float*>(&(*it));
         it += sizeof(float);
@@ -507,16 +505,16 @@ namespace ControlModding
         std::cout << "AABBMin: (" << mBoundingBox[0] << ", " << mBoundingBox[1] << ", " << mBoundingBox[2] << ")" << std::endl;
         std::cout << "AABBMax: (" << mBoundingBox[3] << ", " << mBoundingBox[4] << ", " << mBoundingBox[5] << ")" << std::endl;
         std::cout << "Flags1: 0x" << std::hex << mMeshFlags1 << std::dec << std::endl;
-    // Unknowns: surfaced for analysis. Early dataset hints:
-    //  - Unknown3 and Unknown5 are floats; they cluster to a few constants in many files.
-    std::cout << "Joint (int32): " << mJoint << std::endl;
-    std::cout << "Unknown3 (float): " << mUnknown3 << std::endl;
-    {
-        const char* skinStr = (mIsRigidMesh == 0) ? "skinned" : (mIsRigidMesh == 1 ? "rigid" : "unknown");
-        std::cout << "IsRigidMesh (u8): " << static_cast<uint32_t>(mIsRigidMesh) << " [" << skinStr << "]" << std::endl;
-    }
-    std::cout << "Unknown5 (float): " << mUnknown5 << std::endl;
-    //
+        // Unknowns: surfaced for analysis. Early dataset hints:
+        //  - Unknown3 and Unknown5 are floats; they cluster to a few constants in many files.
+        std::cout << "Joint (int32): " << mJoint << std::endl;
+        std::cout << "Unknown3 (float): " << mUnknown3 << std::endl;
+        {
+            const char* skinStr = (mIsRigidMesh == 0) ? "skinned" : (mIsRigidMesh == 1 ? "rigid" : "unknown");
+            std::cout << "IsRigidMesh (u8): " << static_cast<uint32_t>(mIsRigidMesh) << " [" << skinStr << "]" << std::endl;
+        }
+        std::cout << "Unknown5 (float): " << mUnknown5 << std::endl;
+        //
 #if 0
         std::cout << "Indices: " << std::endl;
         const uint8_t* indices = mIndexBuffer.data();
