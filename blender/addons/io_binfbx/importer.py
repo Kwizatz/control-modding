@@ -483,12 +483,26 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
             struct.unpack(str(MaterialMapCount) + 'I',
                           file.read(MaterialMapCount*4))
 
-        # Second Material Map
+        # Second Material Map (SecondaryMaterialMap)
+        # Used by Group1 (shadow mesh) for material assignments.
+        # Needed for alpha-tested shadow passes (e.g. foliage opacity masking).
         (count, ) = struct.unpack('I', file.read(4))
         MaterialMaps.append(struct.unpack(
             str(count) + 'I', file.read(count*4)))
 
         # Read Meshes
+        # Two groups of primitives (sub-meshes) are stored:
+        #   Group0 = Visual mesh: draw calls for the color/shading pass.
+        #            Uses the PrimaryMaterialMap (MaterialMaps[0]).
+        #   Group1 = Shadow mesh: draw calls for the shadow map / depth-only pass.
+        #            Uses the SecondaryMaterialMap (MaterialMaps[1]).
+        #
+        # Group1 is a shadow rendering optimization. It typically merges
+        # multiple Group0 submeshes into fewer draw calls (shadow pass only
+        # needs depth, not per-material shading) and drops submeshes that
+        # don't cast shadows (glass, decals, FX/particles). Both groups
+        # reference the same vertex and index buffers.
+        # If Group1 has zero meshes, the object does not cast shadows.
         MeshCollectionNames = ["Group0", "Group1"]
         Meshes = {}
         for MeshCollectionName in MeshCollectionNames:
