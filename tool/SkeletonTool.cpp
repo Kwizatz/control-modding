@@ -130,7 +130,8 @@ namespace ControlModding
         // Skip header
         uint8_t *pointer{buffer.data() + 0x10};
         SubSectionIndex *bone_data{reinterpret_cast<SubSectionIndex *>(pointer)};
-        SubSectionIndex *bone_names{reinterpret_cast<SubSectionIndex *>(pointer+(bone_data->mStart + bone_data->mSize)+((bone_data->mStart + bone_data->mSize) % 0x10))};
+        // Align to next 16-byte boundary from file start to find the bone names section
+        SubSectionIndex *bone_names{reinterpret_cast<SubSectionIndex *>(pointer + ((bone_data->mStart + bone_data->mSize + 0xFu) & ~0xFu))};
         std::cout << "Subsection start: " << std::hex << bone_data->mStart << std::endl;
         std::cout << "Subsection size: " << std::hex << bone_data->mSize << std::endl;
         std::cout << "Subsection count: " << std::hex << bone_data->mCount << std::endl;
