@@ -110,8 +110,9 @@ namespace ControlModding
             mData = *reinterpret_cast<const uint32_t*>(&(*it));
             it += sizeof(uint32_t);
             break;
-        case NoPayload:
-            // No extra data
+        case Integer:
+            mData = *reinterpret_cast<const int32_t*>(&(*it));
+            it += sizeof(int32_t);
             break;
         }
     }
@@ -149,8 +150,8 @@ namespace ControlModding
         case Boolean:
             out.write(reinterpret_cast<const char*>(&std::get<uint32_t>(mData)), sizeof(uint32_t));
             break;
-        case NoPayload:
-            // No data to write
+        case Integer:
+            out.write(reinterpret_cast<const char*>(&std::get<int32_t>(mData)), sizeof(int32_t));
             break;
         }
     }

@@ -25,17 +25,19 @@ SKELETONMAGICK = 0x2
 
 FLOAT = 0x00
 RANGE = 0x01
-COLOR = 0x03
 VECTOR = 0x02
-TEXTUREMAP = 0x09
+COLOR = 0x03
 TEXTURESAMPLER = 0x08
+TEXTUREMAP = 0x09
 BOOLEAN = 0x0C
+INTEGER = 0x10  # e.g. g_iTextureVariationCount; has a 4-byte int32 payload
 
 # Semantics
 POSITION = 0x0
 NORMAL = 0x1
 TEXCOORD = 0x2
 TANGENT = 0x3
+VERTEX_COLOR = 0x4  # Per-vertex color, encoded as BYTE4_SNORM
 BONE_INDEX = 0x5
 BONE_WEIGHT = 0x6
 
@@ -82,11 +84,22 @@ FormatIndexCount = {
 UniformTypeNames = {
     FLOAT: 'float',
     RANGE: 'range',
-    COLOR: 'color',
     VECTOR: 'vector',
-    TEXTUREMAP: 'texturemap',
+    COLOR: 'color',
     TEXTURESAMPLER: 'texturesampler',
-    BOOLEAN: 'boolean'
+    TEXTUREMAP: 'texturemap',
+    BOOLEAN: 'boolean',
+    INTEGER: 'integer',
+}
+
+SemanticNames = {
+    POSITION: 'POSITION',
+    NORMAL: 'NORMAL',
+    TEXCOORD: 'TEXCOORD',
+    TANGENT: 'TANGENT',
+    VERTEX_COLOR: 'VERTEX_COLOR',
+    BONE_INDEX: 'BONE_INDEX',
+    BONE_WEIGHT: 'BONE_WEIGHT',
 }
 
 right_hand_matrix = mathutils.Matrix(
@@ -451,9 +464,9 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                     pass
                 elif UniformType == BOOLEAN:
                     struct.unpack("I", file.read(4))
-                elif UniformType == 0x10:
-                    # Unknown uniform type observed in some assets; appears to carry no payload
-                    pass
+                elif UniformType == INTEGER:
+                    # Integer uniform (e.g. g_iTextureVariationCount); 4-byte int32 payload
+                    struct.unpack("i", file.read(4))
             Materials.append(material)
             bpy.context.window_manager.progress_update(i)
         bpy.context.window_manager.progress_end()
@@ -540,11 +553,18 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                 VertexAttribs = [[], []]
                 FormatStrings = ["", ""]
                 AttribIndex = [0, 0]
-                SemanticCount = { POSITION: 0, NORMAL: 0, TEXCOORD: 0, TANGENT: 0, BONE_INDEX: 0, BONE_WEIGHT: 0 }
+                SemanticCount = { POSITION: 0, NORMAL: 0, TEXCOORD: 0, TANGENT: 0, VERTEX_COLOR: 0, BONE_INDEX: 0, BONE_WEIGHT: 0 }
                 for j in range(VertexAttribCount):
                     (BufferIndex, Type, Semantic, Zero) = struct.unpack(
                         '4B', file.read(4))
-                    # Why are these switched?
+                    # The attribute descriptors use the RENDERER stream index:
+                    #   buf 0 = position + skinning data (renderer stream 0)
+                    #   buf 1 = shading attributes: tangent, normal, texcoord (renderer stream 1)
+                    # But in the file, the physical buffer order is reversed:
+                    #   VB0 (first in file)  = shading attributes
+                    #   VB1 (second in file) = position + skinning
+                    # So we swap the index to align with the physical file buffer order
+                    # (VertexBuffers[0] = VB0 = shading, VertexBuffers[1] = VB1 = position).
                     if BufferIndex == 0:
                         BufferIndex = 1
                     elif BufferIndex == 1:
@@ -577,13 +597,15 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                 # Avoid extracting data more than once if the vertex range is the same
                 if (VertexCount, VertexOffsets[0], VertexOffsets[1]) not in Meshes:
                     MeshData = {"Positions": [], "Normals": [], "UVs": [
-                    ], "Tangents": [], "Indices": [], "Weights": []}
+                    ], "Tangents": [], "Colors": [], "Indices": [], "Weights": []}
                     for j in range(SemanticCount[NORMAL]):
                         MeshData["Normals"].append([])
                     for j in range(SemanticCount[TEXCOORD]):
                         MeshData["UVs"].append([])
                     for j in range(SemanticCount[TANGENT]):
                         MeshData["Tangents"].append([])
+                    for j in range(SemanticCount[VERTEX_COLOR]):
+                        MeshData["Colors"].append([])
                     for j in range(SemanticCount[BONE_INDEX]):
                         MeshData["Indices"].append([])
                     for j in range(SemanticCount[BONE_WEIGHT]):
@@ -620,9 +642,15 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                                     MeshData["Tangents"][attrib["SemanticIndex"]].append(
                                         (vertex[attrib["Index"]]/255.0, vertex[attrib["Index"] + 1]/255.0, vertex[attrib["Index"] + 2]/255.0, vertex[attrib["Index"] + 3]/255.0))
 
-                                elif attrib["Semantic"] == BONE_INDEX:                                    
-                                    # We're only supporting SHORT4_UINT or BYTE4_UINT indices for now
-                                    assert attrib["Type"] == SHORT4_UINT or attrib["Type"] == BYTE4_UINT
+                                elif attrib["Semantic"] == VERTEX_COLOR:
+                                    # Per-vertex color, stored as BYTE4_SNORM
+                                    assert attrib["Type"] == BYTE4_SNORM
+                                    MeshData["Colors"][attrib["SemanticIndex"]].append(
+                                        (vertex[attrib["Index"]]/127.0, vertex[attrib["Index"] + 1]/127.0, vertex[attrib["Index"] + 2]/127.0, vertex[attrib["Index"] + 3]/127.0))
+
+                                elif attrib["Semantic"] == BONE_INDEX:
+                                    # We're only supporting SHORT4_UINT, BYTE4_UINT or BYTE4_UNORM indices for now
+                                    assert attrib["Type"] == SHORT4_UINT or attrib["Type"] == BYTE4_UINT or attrib["Type"] == BYTE4_UNORM
                                     MeshData["Indices"][attrib["SemanticIndex"]].append(
                                         (vertex[attrib["Index"]], vertex[attrib["Index"] + 1], vertex[attrib["Index"] + 2], vertex[attrib["Index"] + 3]))
                                 elif attrib["Semantic"] == BONE_WEIGHT:
@@ -640,6 +668,7 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                 Normals = []
                 UVs = []
                 Tangents = []
+                Colors = []
                 Indices = []
                 Weights = []
                 VertexMap = {}
@@ -649,6 +678,8 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                     UVs.append([])
                 for j in range(SemanticCount[TANGENT]):
                     Tangents.append([])
+                for j in range(SemanticCount[VERTEX_COLOR]):
+                    Colors.append([])
                 for j in range(SemanticCount[BONE_INDEX]):
                     Indices.append([])
                 for j in range(SemanticCount[BONE_WEIGHT]):
@@ -668,6 +699,9 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                             for j in range(SemanticCount[TANGENT]):
                                 Tangents[j].append(
                                     MeshData["Tangents"][j][index])
+                            for j in range(SemanticCount[VERTEX_COLOR]):
+                                Colors[j].append(
+                                    MeshData["Colors"][j][index])
                             for j in range(SemanticCount[BONE_INDEX]):
                                 Indices[j].append(
                                     MeshData["Indices"][j][index])
@@ -692,6 +726,12 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
 
                 # Cannot directly set tangents [sadface]
                 mesh_data.calc_tangents()
+
+                for j in range(SemanticCount[VERTEX_COLOR]):
+                    color_layer = mesh_data.color_attributes.new(
+                        name="Color" + str(j), type='FLOAT_COLOR', domain='POINT')
+                    for k in range(len(Colors[j])):
+                        color_layer.data[k].color = Colors[j][k]
 
                 if SemanticCount[BONE_INDEX] != 0:
                     armature_modifier = mesh_object.modifiers.new(

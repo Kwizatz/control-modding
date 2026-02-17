@@ -32,17 +32,17 @@ namespace ControlModding
     enum UniformVariableType {
         Float = 0x00,
         Range = 0x01,
-        Color = 0x03,
         Vector = 0x02,
-        TextureMap = 0x09,
+        Color = 0x03,
         TextureSampler = 0x08,
+        TextureMap = 0x09,
         Boolean = 0x0C,
-        NoPayload = 0x10, // Observed type with no payload
+        Integer = 0x10, // 4-byte int32 payload, e.g. g_iTextureVariationCount
     };
     enum AttributeType : uint8_t {
         FLOAT3       = 0x2,  // POSITION
-        BYTE4_SNORM  = 0x4,  // TANGENT ?
-        BYTE4_UNORM  = 0x5, // BONE_WEIGHT
+        BYTE4_SNORM  = 0x4,  // TANGENT, VERTEX_COLOR
+        BYTE4_UNORM  = 0x5,  // BONE_WEIGHT, BONE_INDEX
         SHORT2_SNORM = 0x7,  // TEXCOORD
         SHORT4_SNORM = 0x8,  // NORMAL
         SHORT4_UINT  = 0xd,  // BONE_INDEX
@@ -68,7 +68,7 @@ namespace ControlModding
     struct AttributeInfo{
         uint8_t Index; // 0x0 = AttributeBuffer, 0x1 = VertexBuffer
         AttributeType Type;  // 0x4 = B8G8R8A8_UNORM, 0x7 = R16G16_SINT, 0x8 = R16G16B16A16_SINT, 0xd = R16G16B16A16_UINT, 0x5 =  R8G8B8A8_UINT
-        uint8_t Usage; // 0x1 = Normal, 0x2 = TexCoord, 0x3 = Tangent, 0x5 = Index, 0x6 = Weight
+        uint8_t Usage; // 0x0 = Position, 0x1 = Normal, 0x2 = TexCoord, 0x3 = Tangent, 0x4 = Color, 0x5 = Index, 0x6 = Weight
         uint8_t Zero;  // Always 0?
         operator uint32_t() const { return *reinterpret_cast<const uint32_t*>(this); }
         AttributeInfo(std::vector<uint8_t>::const_iterator& it) : Index{*it++}, Type{*it++}, Usage{*it++}, Zero{*it++} {}
@@ -93,7 +93,7 @@ namespace ControlModding
         UniformVariable(std::vector<uint8_t>::const_iterator& it);
         void Write(std::ofstream& out) const;
     private:
-        using UniformData = std::variant<std::monostate, float, uint32_t, std::array<float, 2>, std::array<float, 3>, std::array<float, 4>, std::string>;
+        using UniformData = std::variant<std::monostate, float, uint32_t, int32_t, std::array<float, 2>, std::array<float, 3>, std::array<float, 4>, std::string>;
         std::string mName{};
         uint32_t mUniformType{};
         UniformData mData{};
