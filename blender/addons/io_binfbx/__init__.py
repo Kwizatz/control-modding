@@ -1,4 +1,4 @@
-# Copyright (C) 2021-2023,2025 Rodrigo Jose Hernandez Cordoba
+# Copyright (C) 2021-2023,2025-2026 Rodrigo Jose Hernandez Cordoba
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import bpy
 bl_info = {
     "name": "Remedy's Control Mesh, Skeleton, and RBF Format (.binfbx,.binskeleton,.rbf)",
     "author": "Rodrigo Hernandez",
-    "version": (0, 0, 6),
+    "version": (0, 0, 7),
     "blender": (4, 4, 0),
     "location": "File > Import/Export > Control BinFBX",
     "description": "BinFBX, BinSkeleton, and RBF importing and exporting",
