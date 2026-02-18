@@ -16,12 +16,12 @@ from . import importer
 from . import exporter
 import bpy
 bl_info = {
-    "name": "Remedy's Control Mesh and Skeleton Format (.binfbx,.binskeleton)",
+    "name": "Remedy's Control Mesh, Skeleton, and RBF Format (.binfbx,.binskeleton,.rbf)",
     "author": "Rodrigo Hernandez",
-    "version": (0, 0, 5),
+    "version": (0, 0, 6),
     "blender": (4, 4, 0),
     "location": "File > Import/Export > Control BinFBX",
-    "description": "BinFBX importing and exporting",
+    "description": "BinFBX, BinSkeleton, and RBF importing and exporting",
     "warning": "",
     "wiki_url": "",
     "tracker_url": "",
@@ -32,7 +32,7 @@ bl_info = {
 def binfbx_import_menu_func(self, context):
     self.layout.operator(
         importer.IMPORT_OT_binfbx.bl_idname,
-        text="Control Mesh or Skeleton (.binfbx,.binskeleton)")
+        text="Control Mesh, Skeleton, or RBF (.binfbx,.binskeleton,.rbf)")
     
 def binfbx_export_menu_func(self, context):
     self.layout.operator(

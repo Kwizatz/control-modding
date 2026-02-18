@@ -17,11 +17,13 @@ import os
 import os.path
 import struct
 import mathutils
+import json
 #from multiprocessing import Pool
 #from multiprocessing.dummy import Pool as ThreadPool, Lock as ThreadLock
 
 FBXMAGICK = 0x2e
 SKELETONMAGICK = 0x2
+RBFMAGICK = 0xD34DB33F
 
 FLOAT = 0x00
 RANGE = 0x01
@@ -105,18 +107,214 @@ SemanticNames = {
 right_hand_matrix = mathutils.Matrix(
     ((-1, 0, 0, 0), (0, 0, -1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))
 
+# RBF node type hashes (tagged binary tree format)
+RBF_ROOT    = 0x97C27164
+RBF_SECTION = 0x62C7ECBD
+RBF_LEAF_A  = 0xED01652B  # Solver entry: input bone ref + component
+RBF_LEAF_B  = 0x33D0511D  # Output map: output count + param
+RBF_LEAF_C  = 0x341D0EEA  # Pose sample: input quaternion + output translation
+
+# Quaternion component names for RBF
+RBF_QUAT_COMP = {0: 'x', 1: 'y', 2: 'z', 3: 'w'}
+
+
+def fnv1a_lower(name):
+    """FNV-1a hash matching Northlight engine (case-folded via OR 0x20)."""
+    h = 0x811c9dc5
+    for c in name:
+        h ^= (ord(c) | 0x20)
+        h = (h * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
+def bone_names_from_skeleton(skel_data):
+    """Extract ASCII bone name strings from raw .binskeleton bytes."""
+    names = []
+    i = 0
+    while i < len(skel_data):
+        end = i
+        while end < len(skel_data) and 32 <= skel_data[end] < 127:
+            end += 1
+        if end - i >= 3 and end < len(skel_data) and skel_data[end] == 0:
+            name = skel_data[i:end].decode('ascii')
+            if any(c.isalpha() for c in name):
+                names.append(name)
+            i = end + 1
+        else:
+            i += 1
+    return names
+
+
+def load_rbf(filepath):
+    """Parse a Northlight .rbf (Radial Basis Function) file.
+
+    Returns a dict with keys:
+        version     - file version (2)
+        input_bones - list of {'hash': int, 'name': str or None}
+        output_bones- list of {'hash': int, 'name': str or None}
+        sections    - list of section dicts, each with:
+            entries     - list of entry dicts (LEAF_A / B / C combined)
+            solver_dim  - uint32 header from data blob
+            solver_data - raw bytes of pre-computed solver data
+    Each entry dict has:
+        num_inputs     - int (1-4), number of input dimensions
+        bone_ref       - int, input bone/channel reference
+        component      - int (0-3), quaternion component index
+        output_count   - int, number of output bones affected
+        param          - int, LEAF_B param field
+        input_quat     - (qx, qy, qz, qw) sample quaternion
+        input_pos      - (tx, ty, tz) output translation
+        output_indices - list of int, indices into output_bones table
+    """
+    with open(filepath, 'rb') as f:
+        data = f.read()
+
+    # Root header: magic(4) ver(4) size(4) type(4) num_sections(4) total_count(4)
+    magic, ver, root_sz, root_type = struct.unpack_from('<IIII', data, 0)
+    if magic != RBFMAGICK:
+        raise ValueError(f"Not an RBF file (magic 0x{magic:08X}, expected 0x{RBFMAGICK:08X})")
+
+    num_sections, total_count = struct.unpack_from('<II', data, 16)
+    off = 24
+
+    sections = []
+    for s in range(num_sections):
+        if off + 32 > len(data):
+            break
+        sec_magic, sec_ver, sec_sz, sec_type = struct.unpack_from('<IIII', data, off)
+        if sec_magic != RBFMAGICK:
+            break  # Gracefully stop if section header is invalid
+        sec_end = off + sec_sz
+        unk, data_sz, start_idx, count = struct.unpack_from('<IIII', data, off + 16)
+        p = off + 32
+
+        # --- LEAF_A: solver entries ---
+        leaf_a = []
+        for i in range(count):
+            la_magic, la_ver, la_sz, la_type = struct.unpack_from('<IIII', data, p)
+            if la_magic != RBFMAGICK:
+                break
+            always1, num_inputs, bone_ref, component, sentinel = struct.unpack_from('<IIIII', data, p + 16)
+            leaf_a.append({'num_inputs': num_inputs, 'bone_ref': bone_ref, 'component': component})
+            p += la_sz
+
+        # --- LEAF_B: output maps ---
+        b_count = struct.unpack_from('<I', data, p)[0]
+        p += 4
+        leaf_b = []
+        for i in range(b_count):
+            lb_magic, lb_ver, lb_sz, lb_type = struct.unpack_from('<IIII', data, p)
+            if lb_magic != RBFMAGICK:
+                break
+            always1, output_count, param, sentinel = struct.unpack_from('<IIII', data, p + 16)
+            leaf_b.append({'output_count': output_count, 'param': param})
+            p += lb_sz
+
+        # --- LEAF_C: pose samples ---
+        c_count = struct.unpack_from('<I', data, p)[0]
+        p += 4
+        leaf_c = []
+        for i in range(c_count):
+            lc_magic, lc_ver, lc_sz, lc_type = struct.unpack_from('<IIII', data, p)
+            if lc_magic != RBFMAGICK:
+                break
+            floats = struct.unpack_from('<10f', data, p + 16)
+            # floats: [pad0, pad1, qx, qy, qz, qw, tx, ty, tz, sentinel_as_float]
+            leaf_c.append({
+                'input_quat': (floats[2], floats[3], floats[4], floats[5]),
+                'input_pos': (floats[6], floats[7], floats[8]),
+            })
+            p += lc_sz
+
+        # --- Data blob: solver_dim + output indices + solver data ---
+        blob_start = p
+        total_outputs = sum(e['output_count'] for e in leaf_b)
+        solver_dim = 0
+        output_indices_flat = []
+        solver_data = b''
+
+        if blob_start < sec_end:
+            solver_dim = struct.unpack_from('<I', data, blob_start)[0]
+            idx_start = blob_start + 4
+            if idx_start + total_outputs * 4 <= sec_end:
+                output_indices_flat = list(struct.unpack_from(
+                    f'<{total_outputs}I', data, idx_start))
+            solver_data_start = idx_start + total_outputs * 4
+            if solver_data_start < sec_end:
+                solver_data = data[solver_data_start:sec_end]
+
+        # --- Combine into entries ---
+        entries = []
+        idx_offset = 0
+        n = min(len(leaf_a), len(leaf_b), len(leaf_c))
+        for i in range(n):
+            oc = leaf_b[i]['output_count']
+            entry = {
+                'num_inputs': leaf_a[i]['num_inputs'],
+                'bone_ref': leaf_a[i]['bone_ref'],
+                'component': leaf_a[i]['component'],
+                'output_count': oc,
+                'param': leaf_b[i]['param'],
+                'input_quat': leaf_c[i]['input_quat'],
+                'input_pos': leaf_c[i]['input_pos'],
+                'output_indices': output_indices_flat[idx_offset:idx_offset + oc],
+            }
+            entries.append(entry)
+            idx_offset += oc
+
+        sections.append({
+            'entries': entries,
+            'solver_dim': solver_dim,
+            'solver_data': solver_data,
+            'data_sz': data_sz,
+            'start_idx': start_idx,
+        })
+        off = sec_end
+
+    # --- Root tail: input bone hashes, output bone hashes, trailing magic ---
+    input_bones = []
+    output_bones = []
+    if off + 4 <= len(data):
+        n_input = struct.unpack_from('<I', data, off)[0]
+        if n_input < 10000 and off + 4 + n_input * 4 <= len(data):
+            for i in range(n_input):
+                h = struct.unpack_from('<I', data, off + 4 + i * 4)[0]
+                input_bones.append({'hash': h, 'name': None})
+            out_off = off + 4 + n_input * 4
+            if out_off + 4 <= len(data):
+                n_output = struct.unpack_from('<I', data, out_off)[0]
+                if n_output < 100000 and out_off + 4 + n_output * 4 <= len(data):
+                    for i in range(n_output):
+                        h = struct.unpack_from('<I', data, out_off + 4 + i * 4)[0]
+                        output_bones.append({'hash': h, 'name': None})
+
+    return {
+        'version': ver,
+        'input_bones': input_bones,
+        'output_bones': output_bones,
+        'sections': sections,
+    }
+
+
+def resolve_rbf_bone_names(rbf_data, hash_to_name):
+    """Resolve bone hash values to names using a hash→name mapping dict."""
+    for bone in rbf_data['input_bones']:
+        bone['name'] = hash_to_name.get(bone['hash'])
+    for bone in rbf_data['output_bones']:
+        bone['name'] = hash_to_name.get(bone['hash'])
+
 
 def Vector3IsClose(v1, v2):
     return abs(v2[0] - v1[0]) < 0.001 and abs(v2[1] - v1[1]) < 0.001 and abs(v2[2] - v1[2]) < 0.001
 
 
 class IMPORT_OT_binfbx(bpy.types.Operator):
-    '''Imports a binfbx or binskeleton file'''
+    '''Imports a binfbx, binskeleton, or rbf file'''
     bl_idname = "import.binfbx"
     bl_label = "Import"
     filepath: bpy.props.StringProperty(name="BinFBX", subtype='FILE_PATH')
     filter_glob: bpy.props.StringProperty(
-        default="*.binfbx;*.binskeleton",
+        default="*.binfbx;*.binskeleton;*.rbf",
         options={'HIDDEN'},
     )
     # Optional: verbose debug logging of parsed fields (global params and per-mesh bounds/flags)
@@ -139,6 +337,9 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
             # Import Mesh (Includes implicit skeleton)
             print("Importing Mesh")
             return self.import_binfbx()
+        elif ext == ".rbf":
+            print("Importing RBF")
+            return self.import_rbf()
         else:
             self.report({'ERROR'}, "Invalid file extension")
             return {'CANCELLED'}
@@ -217,6 +418,315 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
         for joint in armature_data.edit_bones:
             joint.matrix = right_hand_matrix @ joint.matrix
         bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.context.window.cursor_set("DEFAULT")
+        return {'FINISHED'}
+
+    def import_rbf(self):
+        """Import a Northlight .rbf (Radial Basis Function) corrective bone file.
+
+        Parses the RBF solver data and creates a summary empty object with
+        custom properties storing the section/entry data.  If a matching
+        .binskeleton file is found next to the .rbf, bone hashes are
+        resolved to human-readable names.
+        """
+        self.filepath = bpy.path.ensure_ext(self.filepath, ".rbf")
+
+        # --- Parse the RBF file ---
+        try:
+            rbf = load_rbf(self.filepath)
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to parse RBF: {e}")
+            return {'CANCELLED'}
+
+        # --- Attempt to resolve bone hashes via a nearby skeleton ---
+        hash_to_name = {}
+        rbf_dir = os.path.dirname(self.filepath)
+        rbf_base = os.path.splitext(os.path.basename(self.filepath))[0]
+
+        # Search strategy: look for <base>_physx.binskeleton in common locations
+        skel_search_dirs = [rbf_dir]
+        # Walk up looking for data root
+        data_root = os.path.abspath(self.filepath)
+        for marker in (os.sep + "data" + os.sep, os.sep + "data_pc" + os.sep):
+            idx = data_root.find(marker)
+            if idx != -1:
+                data_root = data_root[:idx + len(marker) - 1]
+                skel_search_dirs.append(os.path.join(data_root, "objects", "characters", "intermediate"))
+                break
+
+        skel_candidates = [
+            rbf_base + "_physx.binskeleton",
+            rbf_base + ".binskeleton",
+        ]
+        skel_path = None
+        for d in skel_search_dirs:
+            for cand in skel_candidates:
+                p = os.path.join(d, cand)
+                if os.path.isfile(p):
+                    skel_path = p
+                    break
+            if skel_path:
+                break
+
+        if skel_path:
+            try:
+                with open(skel_path, 'rb') as f:
+                    skel_data = f.read()
+                names = bone_names_from_skeleton(skel_data)
+                hash_to_name = {fnv1a_lower(n): n for n in names}
+                resolve_rbf_bone_names(rbf, hash_to_name)
+                print(f"RBF: resolved bone names from {os.path.basename(skel_path)} "
+                      f"({len(hash_to_name)} names)")
+            except Exception as e:
+                print(f"RBF: warning: could not read skeleton {skel_path}: {e}")
+        else:
+            # Try to resolve from any armature already in the scene
+            for obj in bpy.data.objects:
+                if obj.type == 'ARMATURE' and obj.data:
+                    for bone in obj.data.bones:
+                        h = fnv1a_lower(bone.name)
+                        hash_to_name[h] = bone.name
+            if hash_to_name:
+                resolve_rbf_bone_names(rbf, hash_to_name)
+                print(f"RBF: resolved bone names from scene armature ({len(hash_to_name)} names)")
+            else:
+                print("RBF: no skeleton found, bone hashes will not be resolved")
+
+        # --- Print summary ---
+        n_input = len(rbf['input_bones'])
+        n_output = len(rbf['output_bones'])
+        n_sections = len(rbf['sections'])
+        total_entries = sum(len(sec['entries']) for sec in rbf['sections'])
+
+        print(f"\n{'='*60}")
+        print(f"RBF: {os.path.basename(self.filepath)}")
+        print(f"  Version: {rbf['version']}")
+        print(f"  Sections: {n_sections}, Total entries: {total_entries}")
+        print(f"  Input bones (drivers): {n_input}")
+        print(f"  Output bones (corrective): {n_output}")
+
+        # Resolved input bone names
+        resolved_in = [b for b in rbf['input_bones'] if b['name']]
+        if resolved_in:
+            print(f"\n  Input bones ({len(resolved_in)} resolved):")
+            for i, b in enumerate(rbf['input_bones']):
+                label = b['name'] if b['name'] else f"0x{b['hash']:08X}"
+                print(f"    [{i:2d}] {label}")
+
+        # Section summaries
+        for si, sec in enumerate(rbf['sections']):
+            entries = sec['entries']
+            if not entries:
+                continue
+            # Unique input bone_refs
+            unique_refs = sorted(set(e['bone_ref'] for e in entries))
+            # Unique output indices
+            all_out = set()
+            for e in entries:
+                all_out.update(e['output_indices'])
+            unique_out = sorted(all_out)
+
+            print(f"\n  Section {si}: {len(entries)} entries, solver_dim={sec['solver_dim']}")
+            print(f"    Input bone_refs: {unique_refs}")
+            # Show output bone names
+            out_names = []
+            for idx in unique_out:
+                if idx < n_output:
+                    b = rbf['output_bones'][idx]
+                    out_names.append(b['name'] if b['name'] else f"0x{b['hash']:08X}")
+                else:
+                    out_names.append(f"idx_{idx}")
+            print(f"    Output bones ({len(unique_out)}): {out_names}")
+
+        print(f"{'='*60}\n")
+
+        # --- Apply to armature if available, else create summary empty ---
+        rbf_name = os.path.splitext(os.path.basename(self.filepath))[0]
+
+        # Collect resolved name sets for quick lookup
+        input_name_set = {b['name'] for b in rbf['input_bones'] if b['name']}
+        output_name_set = {b['name'] for b in rbf['output_bones'] if b['name']}
+
+        # Build per-input-bone summary: which sections/components/outputs it drives
+        input_bone_info = {}  # name -> {sections, components, outputs}
+        for si, sec in enumerate(rbf['sections']):
+            for e in sec['entries']:
+                # Resolve bone_ref to a name via the entry's component cross-ref
+                # bone_ref is an index into the input_bones table
+                br = e['bone_ref']
+                if br < n_input and rbf['input_bones'][br]['name']:
+                    bname = rbf['input_bones'][br]['name']
+                else:
+                    bname = f"input_{br}"
+                if bname not in input_bone_info:
+                    input_bone_info[bname] = {'sections': set(), 'components': set(), 'outputs': set()}
+                input_bone_info[bname]['sections'].add(si)
+                input_bone_info[bname]['components'].add(RBF_QUAT_COMP.get(e['component'], str(e['component'])))
+                for idx in e['output_indices']:
+                    if idx < n_output and rbf['output_bones'][idx]['name']:
+                        input_bone_info[bname]['outputs'].add(rbf['output_bones'][idx]['name'])
+
+        # Build per-output-bone summary: which input bones drive it
+        output_bone_info = {}  # name -> {drivers}
+        for si, sec in enumerate(rbf['sections']):
+            for e in sec['entries']:
+                br = e['bone_ref']
+                if br < n_input and rbf['input_bones'][br]['name']:
+                    driver_name = rbf['input_bones'][br]['name']
+                else:
+                    driver_name = f"input_{br}"
+                for idx in e['output_indices']:
+                    if idx < n_output and rbf['output_bones'][idx]['name']:
+                        oname = rbf['output_bones'][idx]['name']
+                    else:
+                        oname = f"output_{idx}"
+                    if oname not in output_bone_info:
+                        output_bone_info[oname] = {'drivers': set()}
+                    output_bone_info[oname]['drivers'].add(driver_name)
+
+        # Find the target armature
+        armature_obj = None
+        for obj in bpy.data.objects:
+            if obj.type == 'ARMATURE' and obj.data:
+                armature_obj = obj
+                break
+
+        applied_count = 0
+        if armature_obj and (input_name_set or output_name_set):
+            armature = armature_obj.data
+            bone_names_in_armature = {b.name for b in armature.bones}
+
+            # --- Create bone collections for RBF roles (Blender 4.0+) ---
+            try:
+                # Input (driver) bones collection
+                rbf_in_coll = None
+                rbf_out_coll = None
+                coll_name_in = "RBF Inputs"
+                coll_name_out = "RBF Outputs"
+
+                # Remove existing RBF collections to avoid duplicates on re-import
+                for cname in (coll_name_in, coll_name_out):
+                    existing = armature.collections.get(cname)
+                    if existing:
+                        armature.collections.remove(existing)
+
+                rbf_in_coll = armature.collections.new(coll_name_in)
+                rbf_out_coll = armature.collections.new(coll_name_out)
+
+                # Assign bones to collections
+                for bname in input_name_set & bone_names_in_armature:
+                    bone = armature.bones.get(bname)
+                    if bone:
+                        rbf_in_coll.assign(bone)
+                        applied_count += 1
+
+                for bname in output_name_set & bone_names_in_armature:
+                    bone = armature.bones.get(bname)
+                    if bone:
+                        rbf_out_coll.assign(bone)
+                        applied_count += 1
+
+                print(f"RBF: created bone collections '{coll_name_in}' "
+                      f"({len(input_name_set & bone_names_in_armature)} bones) and "
+                      f"'{coll_name_out}' ({len(output_name_set & bone_names_in_armature)} bones)")
+            except (AttributeError, TypeError) as e:
+                print(f"RBF: bone collections not available ({e}), skipping")
+
+            # --- Tag bones with custom properties ---
+            # We need to use pose bones for custom properties (armature.bones are read-only outside edit mode)
+            pose = armature_obj.pose
+            for bname in input_name_set & bone_names_in_armature:
+                pbone = pose.bones.get(bname)
+                if pbone and bname in input_bone_info:
+                    info = input_bone_info[bname]
+                    pbone["rbf_role"] = "input"
+                    pbone["rbf_components"] = ",".join(sorted(info['components']))
+                    pbone["rbf_output_count"] = len(info['outputs'])
+                    # Store the names of output bones this input drives
+                    driven = sorted(info['outputs'])
+                    if len(driven) <= 20:
+                        pbone["rbf_drives"] = ",".join(driven)
+                    else:
+                        pbone["rbf_drives"] = ",".join(driven[:20]) + f"...+{len(driven)-20}"
+
+            for bname in output_name_set & bone_names_in_armature:
+                pbone = pose.bones.get(bname)
+                if pbone and bname in output_bone_info:
+                    info = output_bone_info[bname]
+                    pbone["rbf_role"] = "output"
+                    pbone["rbf_driver_count"] = len(info['drivers'])
+                    drivers = sorted(info['drivers'])
+                    if len(drivers) <= 10:
+                        pbone["rbf_driven_by"] = ",".join(drivers)
+                    else:
+                        pbone["rbf_driven_by"] = ",".join(drivers[:10]) + f"...+{len(drivers)-10}"
+
+            print(f"RBF: tagged {len(input_name_set & bone_names_in_armature)} input and "
+                  f"{len(output_name_set & bone_names_in_armature)} output pose bones with custom properties")
+
+            # Store file-level metadata on the armature object itself
+            armature_obj["rbf_file"] = os.path.basename(self.filepath)
+            armature_obj["rbf_version"] = rbf['version']
+            armature_obj["rbf_section_count"] = n_sections
+            armature_obj["rbf_total_entries"] = total_entries
+        else:
+            if not armature_obj:
+                print("RBF: no armature in scene — import a .binskeleton first to apply RBF data to bones")
+            elif not (input_name_set or output_name_set):
+                print("RBF: no bone names resolved — cannot apply to armature")
+
+        # --- Always create summary empty with full solver data ---
+        rbf_empty = bpy.data.objects.new(rbf_name + "_rbf", None)
+        rbf_empty.empty_display_type = 'PLAIN_AXES'
+        rbf_empty.empty_display_size = 0.1
+        bpy.context.collection.objects.link(rbf_empty)
+
+        # Parent to armature if available
+        if armature_obj:
+            rbf_empty.parent = armature_obj
+
+        # Store metadata as custom properties
+        rbf_empty["rbf_version"] = rbf['version']
+        rbf_empty["rbf_input_bone_count"] = n_input
+        rbf_empty["rbf_output_bone_count"] = n_output
+        rbf_empty["rbf_section_count"] = n_sections
+
+        # Store bone name lists
+        input_names = [b['name'] if b['name'] else f"0x{b['hash']:08X}" for b in rbf['input_bones']]
+        output_names = [b['name'] if b['name'] else f"0x{b['hash']:08X}" for b in rbf['output_bones']]
+        rbf_empty["rbf_input_bones"] = json.dumps(input_names)
+        rbf_empty["rbf_output_bones"] = json.dumps(output_names)
+
+        # Store per-section data
+        for si, sec in enumerate(rbf['sections']):
+            prefix = f"rbf_s{si}"
+            rbf_empty[f"{prefix}_entry_count"] = len(sec['entries'])
+            rbf_empty[f"{prefix}_solver_dim"] = sec['solver_dim']
+
+            # Compact entry data: parallel arrays for each field
+            rbf_empty[f"{prefix}_bone_ref"] = [e['bone_ref'] for e in sec['entries']]
+            rbf_empty[f"{prefix}_component"] = [e['component'] for e in sec['entries']]
+            rbf_empty[f"{prefix}_num_inputs"] = [e['num_inputs'] for e in sec['entries']]
+            rbf_empty[f"{prefix}_output_count"] = [e['output_count'] for e in sec['entries']]
+            rbf_empty[f"{prefix}_param"] = [e['param'] for e in sec['entries']]
+
+            # Flatten quaternions and positions into float arrays
+            quats = []
+            positions = []
+            out_idx = []
+            for e in sec['entries']:
+                quats.extend(e['input_quat'])
+                positions.extend(e['input_pos'])
+                out_idx.extend(e['output_indices'])
+            rbf_empty[f"{prefix}_input_quats"] = quats
+            rbf_empty[f"{prefix}_input_positions"] = positions
+            rbf_empty[f"{prefix}_output_indices"] = out_idx
+
+        status = f"Imported RBF: {n_sections} sections, {total_entries} entries, " \
+                 f"{n_input} input bones, {n_output} output bones"
+        if applied_count > 0:
+            status += f", applied to {applied_count} armature bones"
+        self.report({'INFO'}, status)
         bpy.context.window.cursor_set("DEFAULT")
         return {'FINISHED'}
         
