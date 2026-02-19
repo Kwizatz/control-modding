@@ -74,26 +74,25 @@ Field names are not in any way official and were selected to best represent the 
 | Type       |  Name               |  Comment                                                                       |
 |------------|:-------------------:|--------------------------------------------------------------------------------|
 | uint32_t   | Magick              | Always 0x2e                                                                    |
-| uint32_t   | AttributeBufferSize | Vertex Attribute Buffer size in number of bytes                                |
-| uint32_t   | VertexBufferSize    | Vertex Buffer size in bytes in number of bytes                                 |
+| uint32_t   | AttributeBufferSize | Vertex Attribute Buffer size in bytes                                          |
+| uint32_t   | VertexBufferSize    | Vertex Buffer size in bytes                                                    |
 | uint32_t   | IndexCount          | Number of indices stored into the index buffer                                 |
-| uint32_t   | IndexSize           | Number of bytes per index. 2 seems to be the norm                              |
+| uint32_t   | IndexSize           | Number of bytes per index, 2 is the norm                                       |
 | uint8_t[]  | AttributeBuffer     | Byte array of size AttributeBufferSize                                         |
-| uint8_t[]  | VertexBuffer        | Byte array of size VertexBufferSize. Can be read as an array of float vec3     |
+| uint8_t[]  | VertexBuffer        | Byte array of size VertexBufferSize                                            |
 | uint8_t[]  | IndexBuffer         | Byte array of size IndexCount * IndexSize                                      |
-| See below  | Binding Skeleton    | While Optional if not available you'll find a uint32_t of 0x00000000 here      |
-| uint32_t[2]| Reserved            | Always both zero accross all game files                                        |
-| float      | GlobalScale         | Not sure what this does                                                        |
-| uint32_t[] | LOD Thresholds      | Not sure what this does (related to CDFs?)                                     |
-| float      | MirrorSign          | Not sure what this does, supposed to be related to matrix mirroring            |
-| float[3]   | Bounding Sphere Ctr | Fixed size array of 3 floats representing Global Bounding Sphere Center        |
-| float      | B. Sphere radius    | 1 float representing Global Bounding Sphere Radius                             |
-| float[3]   | AABB Min            | Fixed size array of 3 floats representing Global AABB Min                      |
-| float[3]   | AABB Max            | Fixed size array of 3 floats representing Global AABB Max                      |
-| float[11]  | Unknown             | Fixed size array of 11 floats                                                  |
-| uint32_t   | LoDCount            | Number of Level of Detail meshes                                               |
-| See below  | Material Data       | A combination of uniform metadata and actual values to set in uniform bindings |
-| See below  | Mesh Data           | Data on where each mesh is located in the buffers                              |
+| See below  | Binding Skeleton    | Optional; if absent the joint count is 0x00000000                              |
+| int32_t[2] | Reserved            | Always both zero across all game files                                         |
+| float      | GlobalScale         | Uniform scale factor applied to the entire model                               |
+| uint32_t+float[] | LODThresholds | Variable-length: uint32_t count followed by that many float distance thresholds|
+| float      | MirrorSign          | Coordinate system handedness sign (-1.0 or 1.0)                               |
+| float[3]   | AABBCenter          | Global bounding-sphere / AABB center                                          |
+| float      | BoundingSphereRadius| Global bounding-sphere radius                                                 |
+| float[3]   | AABBMin             | Global axis-aligned bounding box minimum                                       |
+| float[3]   | AABBMax             | Global axis-aligned bounding box maximum                                       |
+| uint32_t   | GlobalLODCount      | Number of LOD levels present in this model                                     |
+| See below  | Material Data       | Material definitions, shader params, and uniform variable bindings             |
+| See below  | Mesh Data           | Per-submesh buffer offsets, bounds, and attribute layout                        |
 
 ## Binding Skeleton
 
@@ -111,8 +110,10 @@ The original importer mentions that this can be instead a list of "breakable par
 
 | Type       |  Name               |  Comment                                                                   |
 |------------|:-------------------:|----------------------------------------------------------------------------|
-| float[16]  | JointMatrix         | Binding matrix as a 4x4 float array                                        |
-| uint32_t   | ParentIndex         | Parent Index of this joint, 0xffffffff if joint has no parent              |
+| float[12]  | BindMatrix          | 4x3 row-major inverse bind matrix                                          |
+| float[3]   | BoundingSphereCenter| Joint bounding-sphere center (envelope)                                    |
+| float      | BoundingSphereRadius| Joint bounding-sphere radius                                              |
+| int32_t    | ParentIndex         | Parent index of this joint, 0xffffffff if joint has no parent              |
 
 ## Uniform Data
 
@@ -127,10 +128,12 @@ Uniform Data is provided as an array of "UniformStruct"
 
 | Type       |  Name               |  Comment                                                                                                                                                           |
 |------------|:-------------------:|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| uint32_t[3]| Unknown             | Fixed size array of 3 uint32_t's first value is 7 on files seen, the other 2 may not be uint32_s but they don't make sense as floats                               |
+| uint32_t   | Magick              | Always 7                                                                                                                                                           |
+| uint8_t[8] | MaterialId          | 8-byte material identifier                                                                                                                                        |
 | string     | Name                | Name of 'Material', for example "breakable_glass_glass" or "jesse_civ_jeans" may be just a local identifier                                                        |
 | string     | MaterialDefinition  | Name of the Material definition used, for example "standardmaterial" json files with these names can be found at "data\metadata\materials" with a .matdef extension|
 | string     | MaterialSource      | Path to the material source, usually starts with "sourcedata\materials", probably metadata or development only as the file is not in generic or pc .rmdp files     |
+| uint32_t[6]| MaterialParams      | 6 material parameters: [0] MaterialFlags (bitfield, bit 31 = special pipeline), [1] DecalMode, [2] LayoutVariant, [3] LightingVariant, [4] MaterialFamily (0=standard, 1=hair, 2=eye, 3=cloth), [5] RenderMode (0x4=opaque, 0x1=alpha/masked, 0x8=additive) |
 | See Below  | UniformVariables    | Array of uniform variable data, likely to be compiled into a Uniform Buffer or independently bound to shader uniform variables                                     |
 
 ### Uniform Variable Array
@@ -147,31 +150,47 @@ For some reason Volfin made the comment on the Blender importer that the count s
 | Type       |  Name               |  Comment                                                                                                                                                                                           |
 |------------|:-------------------:|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | string     | Name                | Variable name, probably what you'd ask OpenGL to bind the value to in GLSL, example: "g_bAlphaTest"                                                                                                |
-| uint32_t   | VariableType        | Known types: Float = 0x00, Range = 0x01, Color = 0x03, Vector = 0x02, TextureMap = 0x09, TextureSampler = 0x08, Boolean = 0x0C                                                                     |
-| Depends    | VariablesValue      | Size of the value depends on type Float = 1 float, Range = 2 floats, Color = 4 floats, Vector = 3 floats, TextureMap = string path to image file, TextureSampler = *NO DATA*, Boolean = 1 uint32_t |
+| uint32_t   | VariableType        | Known types: Float = 0x00, Range = 0x01, Vector = 0x02, Color = 0x03, TextureSampler = 0x08, TextureMap = 0x09, Boolean = 0x0C, Integer = 0x10                                                     |
+| Depends    | VariableValue       | Size depends on type: Float = 1 float, Range = 2 floats, Vector = 3 floats, Color = 4 floats, TextureMap = string, TextureSampler = *NO DATA*, Boolean = 1 uint32_t, Integer = 1 int32_t           |
 
 Note: TextureSampler contains no data, likely because you need to generate a texture name or id on DirectX, OpenGL or Vulkan that you will not know until runtime, not sure why have a texture map and a texture sampler yet.
 
+### Material Maps
+
+Between the Material array and the Mesh arrays, three mapping structures link submeshes to materials:
+
+| Type       |  Name               |  Comment                                                                                                                 |
+|------------|:-------------------:|--------------------------------------------------------------------------------------------------------------------------|
+| uint32_t[] | PrimaryMaterialMap  | Array of material indices for Group 0 (visual) meshes; one entry per submesh                                             |
+| See below  | AlternateMaterialMaps| Array of named alternate material maps, each with the same length as the primary map                                    |
+| uint32_t[] | SecondaryMaterialMap| Array of material indices for Group 1 (shadow) meshes; used for alpha-tested shadow passes                               |
+
+Each alternate material map entry is a string name followed by `PrimaryMaterialMap.length` uint32_t indices.
+
 ### Mesh Data
+
+Meshes are stored in two groups:
+- **Group 0** (Visual): draw calls for the color/shading pass, uses PrimaryMaterialMap.
+- **Group 1** (Shadow): draw calls for shadow/depth-only passes, uses SecondaryMaterialMap. Typically merges submeshes and drops non-shadow-casting geometry. Both groups reference the same vertex and index buffers.
+
+Each group is a uint32_t count followed by that many mesh structures:
 
 | Type       |  Name               |  Comment                                                                                                                                                                                           |
 |------------|:-------------------:|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| uint32_t   | LOD                 | Level of detail for the mesh                                                                                                                                                                       |
-| uint32_t   | VertexCount         | Number of vertices in the mesh                                                                                                                                                                     |
-| uint32_t   | TriangleCount       | Number of triangles in the mesh                                                                                                                                                                    |
-| uint32_t[2]| VertexBufferOffset  | Offset to the vertex buffer data for both Vertex and Attribute Buffers                                                                                                                             |
-| uint32_t   | IndexBufferOffset   | Offset to the index buffer data                                                                                                                                                                    |
-| int32_t    | mMeshFlags0         | Not sure                                                                                                                                                                                           |
-| float[4]   | mBoundingSphere     | Bounding sphere of the mesh                                                                                                                                                                        |
-| float[6]   | mBoundingBox        | Bounding box of the mesh                                                                                                                                                                           |
-| int32_t    | mMeshFlags1         | Not sure                                                                                                                                                                                           |
-| See Below  | Attribute Infos     | Vertex Attribute metadata                                                                                                                                                                          |
-| uint32_t   | MaterialBufferOffset| Offset to the material buffer data                                                                                                                                                                 |
-| uint32_t   | SubMeshBufferOffset | Offset to the sub-mesh buffer data                                                                                                                                                                 |
-| int32_t    | Joint               | Unsure, its definitely related to the skeleton, but its usually a very high if not the last of the joint indices. Could suggest a "Joint Palette", but I dont know that that even means            |
-| int32_t    | Unknown             | Who knows?                                                                                                                                                                                         |
-| uint8_t    | IsRigidMesh         | If no skeleton joint deforms this mesh, this is 1 otherwhise is 0                                                                                                                                  |
-| float      | Unknown             | Who knows?                                                                                                                                                                                         |
+| uint32_t   | LOD                 | Level of detail index for this submesh (0 = highest detail)                                                                                                                                        |
+| uint32_t   | VertexCount         | Number of vertices in this submesh                                                                                                                                                                 |
+| uint32_t   | TriangleCount       | Number of triangles in this submesh                                                                                                                                                                |
+| uint32_t[2]| VertexBufferOffset  | Byte offsets into the Attribute and Vertex buffers respectively                                                                                                                                    |
+| uint32_t   | IndexBufferOffset   | Index offset (in indices, not bytes) into the index buffer                                                                                                                                         |
+| int32_t    | MeshFlags0          | Per-mesh rendering flags (bitfield)                                                                                                                                                                |
+| float[4]   | BoundingSphere      | Submesh bounding sphere (cx, cy, cz, radius)                                                                                                                                                      |
+| float[6]   | BoundingBox         | Submesh bounding box (minX, minY, minZ, maxX, maxY, maxZ)                                                                                                                                         |
+| int32_t    | MeshFlags1          | Additional per-mesh flags (bitfield)                                                                                                                                                               |
+| See Below  | AttributeInfos      | Vertex attribute layout; count is a **uint8_t** (not uint32_t)                                                                                                                                     |
+| int32_t    | Joint               | Root joint index for this submesh in the skeleton hierarchy                                                                                                                                        |
+| float      | Unknown3            | Float parameter; clusters at 1.0 for most meshes, exact role TBD                                                                                                                                  |
+| uint8_t    | IsRigidMesh         | 1 if no skeleton joint deforms this mesh, 0 if skinned                                                                                                                                             |
+| float      | Unknown5            | Float parameter; decal meshes show powers-of-two-ish values (4, 8, 16...), exact role TBD                                                                                                         |
 
 ### Attribute Infos
 
@@ -204,7 +223,17 @@ Vertex colour uses BYTE4_SNORM (4 signed bytes). The exact meaning of the channe
 
 ### Shadow / LOD Meshes
 
-Most binfbx files contain multiple mesh entries at different LOD levels. Some meshes use a reduced attribute set (e.g. Position + TexCoord only, no normals or tangent) — these appear to be shadow-map or depth-only meshes. Shadow meshes typically share the same vertex buffer as the main mesh but reference different index ranges.
+Most binfbx files contain multiple mesh entries at different LOD levels. Some meshes use a reduced attribute set (e.g. Position + TexCoord only, no normals or tangent) — these appear to be shadow-map or depth-only meshes. Shadow meshes are stored in Group 1 and typically merge multiple Group 0 submeshes into fewer draw calls. Both groups reference the same vertex and index buffers.
+
+### Trailing Block
+
+After both mesh groups, the file ends with:
+
+| Type       |  Name               |  Comment                                                                   |
+|------------|:-------------------:|----------------------------------------------------------------------------|
+| uint32_t   | Reserved            | Always 0                                                                   |
+| float      | TotalSurfaceArea    | Approximate sum of all triangle areas                                      |
+| float[]    | TriangleAreaCDF     | Variable-length monotonic array [0..1], length ≈ total triangle count      |
 
 ## Remedy's binskeleton file format specification
 

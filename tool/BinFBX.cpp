@@ -700,16 +700,16 @@ namespace ControlModding
 
     void BinFBX::RecomputeTrailerFromMeshes()
     {
-        // Aggregate triangle areas across both groups
+        // Aggregate triangle areas from Group 0, LOD 0 only.
+        // Verified empirically: the game's CDF entry count always equals
+        // the sum of triangle counts for Group 0 LOD 0 submeshes.
         std::vector<float> areas;
         areas.reserve(1024);
         bool ok = false;
-        for (const auto& group : mMeshes)
+        for (const auto& mesh : mMeshes[0])
         {
-            for (const auto& mesh : group)
-            {
-                ok = mesh.AccumulateTriangleAreas(areas) || ok;
-            }
+            if (mesh.GetLOD() != 0) continue;
+            ok = mesh.AccumulateTriangleAreas(areas) || ok;
         }
         if (!ok || areas.empty()) return; // leave existing trailer untouched if we couldn't compute
         // Compute total and CDF normalized to 1.0
