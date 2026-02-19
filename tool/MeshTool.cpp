@@ -68,6 +68,9 @@ namespace ControlModding
         case 0x3:
             os << "Tangent";
             break;
+        case 0x4:
+            os << "Color";
+            break;
         case 0x5:
             os << "Index";
             break;

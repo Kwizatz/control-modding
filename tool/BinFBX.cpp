@@ -316,7 +316,7 @@ namespace ControlModding
         // Build local buffers
         std::tuple<size_t, size_t> vertex_sizes = GetVertexSizes();
         std::unordered_map<size_t, size_t> index_to_local{};
-        index_to_local.reserve(mIndexSize * mTriangleCount * 3);
+        index_to_local.reserve(mTriangleCount * 3);
         mVertexBuffers[0].reserve(mTriangleCount * 3 * std::get<0>(vertex_sizes));
         mVertexBuffers[1].reserve(mTriangleCount * 3 * std::get<1>(vertex_sizes));
         mIndexBuffer.resize(mIndexSize * mTriangleCount * 3);
@@ -797,8 +797,7 @@ namespace ControlModding
             size = static_cast<uint32_t>(std::get<std::string>(i).size());
             out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
             out.write(std::get<std::string>(i).data(), std::get<std::string>(i).size());
-            size = static_cast<uint32_t>(std::get<std::vector<uint32_t>>(i).size());
-            out.write(reinterpret_cast<const char*>(&size), sizeof(uint32_t));
+            // No per-entry count: the reader infers length from mMaterialMaps[0].size()
             out.write(reinterpret_cast<const char*>(std::get<std::vector<uint32_t>>(i).data()), sizeof(uint32_t) * std::get<std::vector<uint32_t>>(i).size());
         }
 
@@ -912,10 +911,18 @@ namespace ControlModding
         mMeshes[aGroup].erase(it);
 
         mMaterialMaps[aGroup].erase(mMaterialMaps[aGroup].begin() + index);
-        if(aGroup == 0 && mAlternateMaterialMaps.size() > index)
+        // Each alternate material map's vector parallels mMaterialMaps[0] (one entry per mesh).
+        // Remove the corresponding per-mesh entry from every alternate map.
+        if(aGroup == 0)
         {
-            /// @todo Need to make sure which mesh group is the one alternate material map is pointing to
-            mAlternateMaterialMaps.erase(mAlternateMaterialMaps.begin() + index);
+            for (auto& alt : mAlternateMaterialMaps)
+            {
+                auto& v = std::get<std::vector<uint32_t>>(alt);
+                if (index < v.size())
+                {
+                    v.erase(v.begin() + static_cast<std::ptrdiff_t>(index));
+                }
+            }
         }
         // Keep trailer consistent with current meshes
         RecomputeTrailerFromMeshes();

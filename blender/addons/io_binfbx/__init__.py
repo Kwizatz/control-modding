@@ -18,7 +18,7 @@ import bpy
 bl_info = {
     "name": "Remedy's Control Mesh, Skeleton, and RBF Format (.binfbx,.binskeleton,.rbf)",
     "author": "Rodrigo Hernandez",
-    "version": (0, 0, 7),
+    "version": (0, 0, 8),
     "blender": (4, 4, 0),
     "location": "File > Import/Export > Control BinFBX",
     "description": "BinFBX, BinSkeleton, and RBF importing and exporting",
