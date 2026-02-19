@@ -444,9 +444,11 @@ def encode_mesh_buffers(mesh_obj, attrib_infos, joint_names):
                 vb0_parts.append(struct.pack('2h', su, sv))
             elif semantic == TANGENT:
                 tang_vec, bitangent_sign = vd['tangent']
-                tx = clamp(int(round(tang_vec[0] * 127)), -128, 127)
-                ty = clamp(int(round(tang_vec[1] * 127)), -128, 127)
-                tz = clamp(int(round(tang_vec[2] * 127)), -128, 127)
+                # Transform tangent direction from Blender space to game space
+                game_tang = inv_right_hand_matrix @ mathutils.Vector(tang_vec)
+                tx = clamp(int(round(game_tang.x * 127)), -128, 127)
+                ty = clamp(int(round(game_tang.y * 127)), -128, 127)
+                tz = clamp(int(round(game_tang.z * 127)), -128, 127)
                 tw = clamp(int(round(bitangent_sign * 127)), -128, 127)
                 vb0_parts.append(struct.pack('4b', tx, ty, tz, tw))
             elif semantic == VERTEX_COLOR:
@@ -617,7 +619,7 @@ def collect_per_mesh_metadata(mesh_obj):
     }
 
 
-# ── Bounding Volume Computation (STUB — returns zeros) ──────────────────────
+# ── Bounding Volume Computation ──────────────────────────────────────────────
 
 def compute_mesh_bounds(mesh_obj):
     """Compute bounding sphere and box for a mesh in game coordinates.
@@ -625,25 +627,91 @@ def compute_mesh_bounds(mesh_obj):
     Returns (bounding_sphere, bounding_box) where:
         bounding_sphere = (cx, cy, cz, radius)
         bounding_box = (minx, miny, minz, maxx, maxy, maxz)
-
-    STUB: returns zeros.  Will be implemented with actual computation later.
     """
-    # TODO: Implement actual bounding volume computation
-    return (0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    mesh = mesh_obj.data
+    if not mesh.vertices:
+        return (0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    # Transform all positions to game coordinates and compute AABB
+    first = inv_right_hand_matrix @ mesh.vertices[0].co
+    minx = maxx = first.x
+    miny = maxy = first.y
+    minz = maxz = first.z
+
+    game_positions = [first]
+    for v in mesh.vertices[1:]:
+        p = inv_right_hand_matrix @ v.co
+        game_positions.append(p)
+        if p.x < minx: minx = p.x
+        elif p.x > maxx: maxx = p.x
+        if p.y < miny: miny = p.y
+        elif p.y > maxy: maxy = p.y
+        if p.z < minz: minz = p.z
+        elif p.z > maxz: maxz = p.z
+
+    # Bounding sphere: center at AABB midpoint, radius = max distance to center
+    cx = (minx + maxx) * 0.5
+    cy = (miny + maxy) * 0.5
+    cz = (minz + maxz) * 0.5
+    radius_sq = 0.0
+    for p in game_positions:
+        dx, dy, dz = p.x - cx, p.y - cy, p.z - cz
+        d2 = dx * dx + dy * dy + dz * dz
+        if d2 > radius_sq:
+            radius_sq = d2
+    radius = math.sqrt(radius_sq)
+
+    return (cx, cy, cz, radius), (minx, miny, minz, maxx, maxy, maxz)
 
 
-# ── Trailer / CDF Computation (STUB — returns zeros) ────────────────────────
+# ── Trailer / CDF Computation ────────────────────────────────────────────────
 
 def compute_trailer(group0_lod0_mesh_objects):
     """Compute the trailing block (triangle area CDF) for Group0 LOD0 meshes.
 
     Returns (reserved, total_surface_area, cdf_array).
 
-    STUB: returns zeros.  Will be implemented with actual cross-product area
-    computation later.
+    Follows the exact algorithm from C++ BinFBX::RecomputeTrailerFromMeshes:
+    - Aggregate triangle areas from Group 0, LOD 0 submeshes
+    - Area = 0.5 * ||cross(e0, e1)|| for each triangle in game coordinates
+    - Build monotonically increasing CDF normalized to [0..1]
     """
-    # TODO: Implement triangle area CDF computation
-    return 0, 0.0, []
+    areas = []
+    for mesh_obj in group0_lod0_mesh_objects:
+        mesh = mesh_obj.data
+        mesh.calc_loop_triangles()
+        if not mesh.loop_triangles:
+            continue
+        for tri in mesh.loop_triangles:
+            # Get triangle vertex positions in game coordinates
+            p0 = inv_right_hand_matrix @ mesh.vertices[tri.vertices[0]].co
+            p1 = inv_right_hand_matrix @ mesh.vertices[tri.vertices[1]].co
+            p2 = inv_right_hand_matrix @ mesh.vertices[tri.vertices[2]].co
+            # edge vectors
+            e0 = p1 - p0
+            e1 = p2 - p0
+            # area = 0.5 * |cross(e0, e1)|
+            cross = e0.cross(e1)
+            area = 0.5 * cross.length
+            areas.append(area)
+
+    if not areas:
+        return 0, 0.0, []
+
+    total = sum(areas)
+    if total <= 0.0:
+        return 0, 0.0, []
+
+    # Build CDF normalized to 1.0
+    cdf = []
+    accum = 0.0
+    for a in areas:
+        accum += a
+        cdf.append(accum / total)
+    # Clamp last to exactly 1.0
+    cdf[-1] = 1.0
+
+    return 0, total, cdf
 
 
 # ── Binary Serialization ────────────────────────────────────────────────────
