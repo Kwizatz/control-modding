@@ -865,23 +865,39 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
             print("  AABBMin:", AABBMin, "AABBMax:", AABBMax)
             print("  GlobalLODCount:", GlobalLODCount)
 
+        # Create metadata empty for round-trip export
+        meta_empty = bpy.data.objects.new("_binfbx_meta", None)
+        meta_empty.empty_display_type = 'PLAIN_AXES'
+        meta_empty.empty_display_size = 0.01
+        bpy.context.collection.objects.link(meta_empty)
+        meta_empty["binfbx_index_size"] = IndexSize
+        meta_empty["binfbx_reserved"] = json.dumps([Reserved0, Reserved1])
+        meta_empty["binfbx_global_scale"] = GlobalScale
+        meta_empty["binfbx_lod_thresholds"] = json.dumps(list(LODThresholds))
+        meta_empty["binfbx_mirror_sign"] = MirrorSign
+        meta_empty["binfbx_aabb_center"] = json.dumps(list(AABBCenter))
+        meta_empty["binfbx_sphere_radius"] = BoundingSphereRadius
+        meta_empty["binfbx_aabb_min"] = json.dumps(list(AABBMin))
+        meta_empty["binfbx_aabb_max"] = json.dumps(list(AABBMax))
+        meta_empty["binfbx_global_lod_count"] = GlobalLODCount
+
         # Read Materials
         Materials = []
         (MaterialCount, ) = struct.unpack('I', file.read(4))
         bpy.context.window_manager.progress_begin(0, JointCount)
         for i in range(MaterialCount):
             # Material Magick
-            struct.unpack("I", file.read(4))
+            (MaterialMagick,) = struct.unpack("I", file.read(4))
             # Material ID
-            struct.unpack("8B", file.read(8))
+            MaterialId = list(struct.unpack("8B", file.read(8)))
 
             # Material Name
             MaterialName = file.read(struct.unpack(
                 'I', file.read(4))[0]).decode('utf-8')
             # Material Type
-            file.read(struct.unpack('I', file.read(4))[0]).decode('utf-8')
+            MaterialType = file.read(struct.unpack('I', file.read(4))[0]).decode('utf-8')
             # Material Path
-            file.read(struct.unpack('I', file.read(4))[0]).decode('utf-8')
+            MaterialPath = file.read(struct.unpack('I', file.read(4))[0]).decode('utf-8')
 
             material = bpy.data.materials.new(MaterialName)
             material.use_nodes = True
@@ -901,10 +917,11 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
             links.new(
                 node_principled.outputs["BSDF"], node_output.inputs["Surface"])
 
-            struct.unpack("6I", file.read(24))
+            MaterialParams = list(struct.unpack("6I", file.read(24)))
 
             (UniformCount, ) = struct.unpack('I', file.read(4))
 
+            uniform_data = []  # Store all uniforms for round-trip export
             node_y_location = 0
             for j in range(UniformCount):
                 # Uniform Name
@@ -912,33 +929,42 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                     'I', file.read(4))[0]).decode('utf-8')
                 # Uniform Type
                 (UniformType, ) = struct.unpack("I", file.read(4))
+                uniform_entry = {"name": UniformName, "type": UniformType}
                 if UniformType == FLOAT:
-                    struct.unpack("f", file.read(4))
+                    (val,) = struct.unpack("f", file.read(4))
+                    uniform_entry["value"] = val
                 elif UniformType == RANGE:
-                    struct.unpack("2f", file.read(8))
+                    val = list(struct.unpack("2f", file.read(8)))
+                    uniform_entry["value"] = val
                 elif UniformType == COLOR:
-                    struct.unpack("4f", file.read(16))
+                    val = list(struct.unpack("4f", file.read(16)))
+                    uniform_entry["value"] = val
                 elif UniformType == VECTOR:
-                    struct.unpack("3f", file.read(12))
+                    val = list(struct.unpack("3f", file.read(12)))
+                    uniform_entry["value"] = val
                 elif UniformType == TEXTUREMAP:
                     image_path = file.read(struct.unpack(
                         'I', file.read(4))[0]).decode('utf-8')
+                    uniform_entry["value"] = image_path
                     if runtime_data_path != "":
-                        image_path = image_path.replace(
+                        resolved_path = image_path.replace(
                             "runtimedata", runtime_data_path)
+                        resolved_path = resolved_path.replace('\\', os.sep).replace('/', os.sep)
                         try:
                             # Add the Image Texture node
                             node_tex = nodes.new('ShaderNodeTexImage')
                             # Assign the image
                             image = bpy.data.images.get(
-                                os.path.basename(image_path))
+                                os.path.basename(resolved_path))
                             if image:
                                 node_tex.image = image
                             else:
                                 node_tex.image = bpy.data.images.load(
-                                    image_path)
+                                    resolved_path)
                                 node_tex.image.colorspace_settings.name = 'Non-Color'
                             node_tex.location = -800, node_y_location
+                            # Blender 4.0+ renamed "Specular" to "Specular IOR Level"
+                            specular_input = "Specular IOR Level" if bpy.app.version >= (4, 0, 0) else "Specular"
                             if UniformName.find("g_sColorMap") != -1:
                                 node_tex.image.colorspace_settings.name = 'sRGB'
                                 links.new(
@@ -947,7 +973,7 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                             # They may have the same use on different shaders so they are named differently.
                             elif UniformName.find("g_sSpecularColorMap") != -1 or UniformName.find("g_sSpecShiftMap") != -1:
                                 links.new(
-                                    node_tex.outputs["Color"], node_principled.inputs["Specular"])
+                                    node_tex.outputs["Color"], node_principled.inputs[specular_input])
                             elif UniformName.find("g_sNormalMap") != -1:
                                 node_normal = nodes.new('ShaderNodeNormalMap')
                                 node_normal.location = -400, node_y_location
@@ -967,31 +993,46 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                                 links.new(
                                     node_tex.outputs["Alpha"], node_principled.inputs["Alpha"])
                             node_y_location += 400
-                        except:
-                            print("Image NOT found:", image_path)
+                        except FileNotFoundError:
+                            print("Image NOT found:", resolved_path)
+                        except Exception as e:
+                            print(f"Warning: texture '{resolved_path}' — {e}")
 
                 elif UniformType == TEXTURESAMPLER:
-                    pass
+                    uniform_entry["value"] = None
                 elif UniformType == BOOLEAN:
-                    struct.unpack("I", file.read(4))
+                    (val,) = struct.unpack("I", file.read(4))
+                    uniform_entry["value"] = val
                 elif UniformType == INTEGER:
                     # Integer uniform (e.g. g_iTextureVariationCount); 4-byte int32 payload
-                    struct.unpack("i", file.read(4))
+                    (val,) = struct.unpack("i", file.read(4))
+                    uniform_entry["value"] = val
+                uniform_data.append(uniform_entry)
+
+            # Store material metadata as custom properties for round-trip export
+            material["binfbx_material_id"] = json.dumps(MaterialId)
+            material["binfbx_material_type"] = MaterialType
+            material["binfbx_material_path"] = MaterialPath
+            material["binfbx_material_params"] = json.dumps(MaterialParams)
+            material["binfbx_uniforms"] = json.dumps(uniform_data)
+
             Materials.append(material)
             bpy.context.window_manager.progress_update(i)
         bpy.context.window_manager.progress_end()
 
         (MaterialMapCount, ) = struct.unpack('I', file.read(4))
-        # First Material Map
+        # First Material Map (PrimaryMaterialMap — Group0 mesh→material mapping)
         MaterialMaps = []
         MaterialMaps.append(struct.unpack(
             str(MaterialMapCount) + 'I', file.read(MaterialMapCount*4)))
 
         (AlternateMaterialMapCount, ) = struct.unpack('I', file.read(4))
+        AlternateMaterialMaps = []
         for i in range(AlternateMaterialMapCount):
-            file.read(struct.unpack('I', file.read(4))[0]).decode('utf-8')
-            struct.unpack(str(MaterialMapCount) + 'I',
-                          file.read(MaterialMapCount*4))
+            alt_name = file.read(struct.unpack('I', file.read(4))[0]).decode('utf-8')
+            alt_indices = list(struct.unpack(str(MaterialMapCount) + 'I',
+                          file.read(MaterialMapCount*4)))
+            AlternateMaterialMaps.append({"name": alt_name, "indices": alt_indices})
 
         # Second Material Map (SecondaryMaterialMap)
         # Used by Group1 (shadow mesh) for material assignments.
@@ -999,6 +1040,11 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
         (count, ) = struct.unpack('I', file.read(4))
         MaterialMaps.append(struct.unpack(
             str(count) + 'I', file.read(count*4)))
+
+        # Store material maps on meta empty for round-trip export
+        meta_empty["binfbx_primary_material_map"] = json.dumps(list(MaterialMaps[0]))
+        meta_empty["binfbx_secondary_material_map"] = json.dumps(list(MaterialMaps[1]))
+        meta_empty["binfbx_alternate_material_maps"] = json.dumps(AlternateMaterialMaps)
 
         # Read Meshes
         # Two groups of primitives (sub-meshes) are stored:
@@ -1033,13 +1079,12 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                     '6I', file.read(6*4))
                 if old_lod != LOD:
                     LODCollection = bpy.data.collections.new(
-                        MeshCollectionName + "-LOD-" + str(LOD))
+                        MeshCollectionName + "-LOD" + str(LOD))
                     MeshCollection.children.link(LODCollection)
                     LODMeshIndex = 0
-                mesh_data = bpy.data.meshes.new(
-                    MeshCollectionName + "LOD-"+str(LOD)+"-Mesh-"+str(LODMeshIndex))
-                mesh_object = bpy.data.objects.new(
-                    MeshCollectionName + "LOD-"+str(LOD)+"-Mesh-"+str(LODMeshIndex), mesh_data)
+                mesh_name = MeshCollectionName + "-LOD" + str(LOD) + "-Mesh" + str(LODMeshIndex)
+                mesh_data = bpy.data.meshes.new(mesh_name)
+                mesh_object = bpy.data.objects.new(mesh_name, mesh_data)
                 LODMeshIndex += 1
                 LODCollection.objects.link(mesh_object)
 
@@ -1078,9 +1123,11 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                 FormatStrings = ["", ""]
                 AttribIndex = [0, 0]
                 SemanticCount = { POSITION: 0, NORMAL: 0, TEXCOORD: 0, TANGENT: 0, VERTEX_COLOR: 0, BONE_INDEX: 0, BONE_WEIGHT: 0 }
+                RawAttribInfos = []  # Store original (unswapped) attribute infos for round-trip
                 for j in range(VertexAttribCount):
                     (BufferIndex, Type, Semantic, Zero) = struct.unpack(
                         '4B', file.read(4))
+                    RawAttribInfos.append([BufferIndex, Type, Semantic, Zero])
                     # The attribute descriptors use the RENDERER stream index:
                     #   buf 0 = position + skinning data (renderer stream 0)
                     #   buf 1 = shading attributes: tangent, normal, texcoord (renderer stream 1)
@@ -1107,14 +1154,19 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                     print(FormatStrings)
                     print(struct.calcsize(FormatStrings[0]))
                     print(struct.calcsize(FormatStrings[1]))
-                # Unknown
-                struct.unpack('i', file.read(4))
-                # Unknown
-                struct.unpack('f', file.read(4))
-                # Unknown
-                struct.unpack('B', file.read(1))
-                # Unknown
-                struct.unpack('f', file.read(4))
+                (MeshJoint,) = struct.unpack('i', file.read(4))
+                (MeshUnknown3,) = struct.unpack('f', file.read(4))
+                (MeshIsRigid,) = struct.unpack('B', file.read(1))
+                (MeshUnknown5,) = struct.unpack('f', file.read(4))
+
+                # Store per-mesh metadata as custom properties for round-trip export
+                mesh_object["binfbx_flags0"] = MeshFlags0
+                mesh_object["binfbx_flags1"] = MeshFlags1
+                mesh_object["binfbx_joint"] = MeshJoint
+                mesh_object["binfbx_unknown3"] = MeshUnknown3
+                mesh_object["binfbx_is_rigid"] = int(MeshIsRigid)
+                mesh_object["binfbx_unknown5"] = MeshUnknown5
+                mesh_object["binfbx_attrib_infos"] = json.dumps(RawAttribInfos)
 
                 # At this point all data is read from the file, so we can start creating the mesh
 
@@ -1164,7 +1216,7 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                                     # We're only supporting BYTE4_SNORM tangents for now
                                     assert attrib["Type"] == BYTE4_SNORM
                                     MeshData["Tangents"][attrib["SemanticIndex"]].append(
-                                        (vertex[attrib["Index"]]/255.0, vertex[attrib["Index"] + 1]/255.0, vertex[attrib["Index"] + 2]/255.0, vertex[attrib["Index"] + 3]/255.0))
+                                        (vertex[attrib["Index"]]/127.0, vertex[attrib["Index"] + 1]/127.0, vertex[attrib["Index"] + 2]/127.0, vertex[attrib["Index"] + 3]/127.0))
 
                                 elif attrib["Semantic"] == VERTEX_COLOR:
                                     # Per-vertex color, stored as BYTE4_SNORM
