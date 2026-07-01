@@ -344,6 +344,33 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
             self.report({'ERROR'}, "Invalid file extension")
             return {'CANCELLED'}
 
+    def get_or_create_import_collection(self):
+        """Return a root collection named after the file (without extension).
+
+        Every object and sub-collection produced by an import is placed inside
+        this collection so several characters can be imported into one scene and
+        stay organized.  If a collection with the same basename already exists
+        — e.g. a skeleton was imported first and now the matching .binfbx is
+        imported — that collection is reused instead of creating a new one.
+        """
+        base = os.path.splitext(os.path.basename(self.filepath))[0]
+        root = bpy.data.collections.get(base)
+        if root is None:
+            root = bpy.data.collections.new(base)
+            bpy.context.scene.collection.children.link(root)
+        elif not self._collection_in_scene(root, bpy.context.scene.collection):
+            # Exists in blend data but not linked to this scene; link it.
+            bpy.context.scene.collection.children.link(root)
+        return root
+
+    @staticmethod
+    def _collection_in_scene(collection, parent):
+        """Return True if *collection* is linked anywhere under *parent*."""
+        for child in parent.children:
+            if child == collection or IMPORT_OT_binfbx._collection_in_scene(collection, child):
+                return True
+        return False
+
     def import_binskeleton(self):
         self.filepath = bpy.path.ensure_ext(self.filepath, ".binskeleton")        
         file = open(self.filepath, "rb")
@@ -394,10 +421,12 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                     "name": file_data[name_offsets[i]:].split(b'\0')[0].decode('utf-8')
                 })
 
+        root_collection = self.get_or_create_import_collection()
+
         armature_data = bpy.data.armatures.new("armature")
         armature_object = bpy.data.objects.new("skeleton", armature_data)
 
-        bpy.context.collection.objects.link(armature_object)
+        root_collection.objects.link(armature_object)
 
         bpy.ops.object.select_all(action='DESELECT')
         bpy.context.view_layer.objects.active = armature_object
@@ -676,10 +705,11 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                 print("RBF: no bone names resolved — cannot apply to armature")
 
         # --- Always create summary empty with full solver data ---
+        root_collection = self.get_or_create_import_collection()
         rbf_empty = bpy.data.objects.new(rbf_name + "_rbf", None)
         rbf_empty.empty_display_type = 'PLAIN_AXES'
         rbf_empty.empty_display_size = 0.1
-        bpy.context.collection.objects.link(rbf_empty)
+        root_collection.objects.link(rbf_empty)
 
         # Parent to armature if available
         if armature_obj:
@@ -750,6 +780,10 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
             self.report({'ERROR'}, "Invalid BinFBX file")
             return {'CANCELLED'}
 
+        # Root collection that groups every object from this import together.
+        # Reuses a collection of the same name if a skeleton was imported first.
+        root_collection = self.get_or_create_import_collection()
+
         VertexBufferSizes = [0, 0]
         (VertexBufferSizes[0], VertexBufferSizes[1], IndexCount,
          IndexSize) = struct.unpack("IIII", file.read(16))
@@ -774,7 +808,7 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
             armature_data = bpy.data.armatures.new("armature")
             armature_object = bpy.data.objects.new("skeleton", armature_data)
 
-            bpy.context.collection.objects.link(armature_object)
+            root_collection.objects.link(armature_object)
 
             bpy.ops.object.select_all(action='DESELECT')
             bpy.context.view_layer.objects.active = armature_object
@@ -869,7 +903,7 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
         meta_empty = bpy.data.objects.new("_binfbx_meta", None)
         meta_empty.empty_display_type = 'PLAIN_AXES'
         meta_empty.empty_display_size = 0.01
-        bpy.context.collection.objects.link(meta_empty)
+        root_collection.objects.link(meta_empty)
         meta_empty["binfbx_index_size"] = IndexSize
         meta_empty["binfbx_reserved"] = json.dumps([Reserved0, Reserved1])
         meta_empty["binfbx_global_scale"] = GlobalScale
@@ -1061,13 +1095,17 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
         # If Group1 has zero meshes, the object does not cast shadows.
         MeshCollectionNames = ["Group0", "Group1"]
         Meshes = {}
+        GroupCollections = {}  # Track collections for visibility
+        LODCollections = {}   # Track LOD collections per group
         for MeshCollectionName in MeshCollectionNames:
             (MeshCount, ) = struct.unpack('I', file.read(4))
             MeshCollection = None
             if MeshCount > 0:
                 MeshCollection = bpy.data.collections.new(MeshCollectionName)
-                bpy.context.scene.collection.children.link(
-                    MeshCollection)  # Add the collection to the scene
+                root_collection.children.link(
+                    MeshCollection)  # Add the collection under the import root
+                GroupCollections[MeshCollectionName] = MeshCollection
+                LODCollections[MeshCollectionName] = []
             LOD = -1
             LODMeshIndex = None
             LODCollection = None
@@ -1081,6 +1119,7 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                     LODCollection = bpy.data.collections.new(
                         MeshCollectionName + "-LOD" + str(LOD))
                     MeshCollection.children.link(LODCollection)
+                    LODCollections[MeshCollectionName].append((LOD, LODCollection))
                     LODMeshIndex = 0
                 mesh_name = MeshCollectionName + "-LOD" + str(LOD) + "-Mesh" + str(LODMeshIndex)
                 mesh_data = bpy.data.meshes.new(mesh_name)
@@ -1333,6 +1372,20 @@ class IMPORT_OT_binfbx(bpy.types.Operator):
                     Materials[MaterialMaps[MeshCollectionNames.index(MeshCollectionName)][i]])
                 bpy.context.window_manager.progress_update(i)
             bpy.context.window_manager.progress_end()
+
+        # Hide Group1 collection entirely
+        if "Group1" in GroupCollections:
+            GroupCollections["Group1"].hide_viewport = True
+
+        # Hide all Group0 LODs higher than LOD 0
+        if "Group0" in LODCollections:
+            for lod_level, lod_coll in LODCollections["Group0"]:
+                if lod_level > 0:
+                    lod_coll.hide_viewport = True
+
+        # Hide the skeleton
+        if JointCount > 0:
+            armature_object.hide_viewport = True
 
         file.close()
         bpy.context.view_layer.update()

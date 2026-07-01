@@ -106,15 +106,26 @@ def find_armature():
     return None
 
 
+def _iter_collections(root):
+    """Yield every collection nested under *root* (depth-first, excluding root)."""
+    for child in root.children:
+        yield child
+        yield from _iter_collections(child)
+
+
 def collect_meshes_from_scene():
     """Walk the scene collection hierarchy and collect mesh objects.
 
     Returns a dict:  {group_index: {lod_index: [(mesh_index, mesh_object), ...]}}
     Meshes within each LOD are sorted by mesh_index.
+
+    Group collections ("Group0", "Group1") are matched wherever they appear in
+    the scene hierarchy, including when nested inside a per-import root
+    collection created by the importer.
     """
     result = {}
-    for collection in bpy.context.scene.collection.children:
-        # Match top-level Group collections: "Group0", "Group1"
+    for collection in _iter_collections(bpy.context.scene.collection):
+        # Match Group collections: "Group0", "Group1"
         if not collection.name.startswith("Group"):
             continue
         try:
